@@ -1,190 +1,320 @@
 
-import { useToast } from "@/hooks/use-toast";
-
-export interface SyncData {
-  type: 'order' | 'menu' | 'table' | 'room' | 'settings';
-  action: 'create' | 'update' | 'delete';
+interface SyncData {
+  type: string;
+  action: string;
   data: any;
-  timestamp: string;
+  timestamp: number;
   deviceId: string;
 }
 
-export interface ConnectedDevice {
+interface SyncMessage {
   id: string;
-  name: string;
-  ip: string;
-  role: string;
-  status: 'online' | 'offline';
-  lastSeen: string;
-  ping?: number;
+  type: 'sync' | 'heartbeat' | 'discovery';
+  data: SyncData | null;
+  timestamp: number;
+  deviceId: string;
 }
 
 class SyncService {
   private ws: WebSocket | null = null;
-  private reconnectTimer: NodeJS.Timeout | null = null;
-  private pingTimer: NodeJS.Timeout | null = null;
   private deviceId: string;
-  private serverUrl: string = 'ws://192.168.1.1:8080'; // Default LAN server
-  private connectedDevices: ConnectedDevice[] = [];
-  private listeners: ((data: SyncData) => void)[] = [];
+  private syncListeners: ((data: SyncData) => void)[] = [];
+  private reconnectInterval: NodeJS.Timeout | null = null;
+  private heartbeatInterval: NodeJS.Timeout | null = null;
+  private connectedDevices: Set<string> = new Set();
+  private isConnected: boolean = false;
+  private useWebSocket: boolean = true;
+  private fallbackSyncInterval: NodeJS.Timeout | null = null;
+  private lastSync: number = 0;
+  private syncQueue: SyncData[] = [];
 
   constructor() {
-    this.deviceId = this.getOrCreateDeviceId();
+    this.deviceId = this.generateDeviceId();
     this.connect();
+    this.startFallbackSync();
   }
 
-  private getOrCreateDeviceId(): string {
-    let deviceId = localStorage.getItem('lokal_device_id');
-    if (!deviceId) {
-      deviceId = `device_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-      localStorage.setItem('lokal_device_id', deviceId);
-    }
-    return deviceId;
+  private generateDeviceId(): string {
+    const stored = localStorage.getItem('lokalrestro_device_id');
+    if (stored) return stored;
+    
+    const newId = `device-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    localStorage.setItem('lokalrestro_device_id', newId);
+    return newId;
   }
 
-  connect(serverUrl?: string) {
-    if (serverUrl) {
-      this.serverUrl = serverUrl;
-    }
-
+  private connect(): void {
     try {
-      this.ws = new WebSocket(this.serverUrl);
+      // Try WebSocket connection first
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${protocol}//localhost:8765`;
+      
+      this.ws = new WebSocket(wsUrl);
       
       this.ws.onopen = () => {
-        console.log('WebSocket connected');
-        this.register();
-        this.startPing();
-        if (this.reconnectTimer) {
-          clearTimeout(this.reconnectTimer);
-          this.reconnectTimer = null;
-        }
+        console.log('WebSocket connected successfully');
+        this.isConnected = true;
+        this.useWebSocket = true;
+        this.startHeartbeat();
+        this.sendDiscovery();
+        this.processSyncQueue();
       };
 
       this.ws.onmessage = (event) => {
         try {
-          const data = JSON.parse(event.data);
-          this.handleMessage(data);
+          const message: SyncMessage = JSON.parse(event.data);
+          this.handleMessage(message);
         } catch (error) {
-          console.error('Failed to parse WebSocket message:', error);
+          console.error('Failed to parse sync message:', error);
         }
       };
 
       this.ws.onclose = () => {
-        console.log('WebSocket disconnected');
-        this.stopPing();
+        console.log('WebSocket connection closed');
+        this.isConnected = false;
+        this.fallbackToLocalSync();
         this.scheduleReconnect();
       };
 
       this.ws.onerror = (error) => {
         console.error('WebSocket error:', error);
+        this.isConnected = false;
+        this.fallbackToLocalSync();
       };
+
     } catch (error) {
       console.error('Failed to connect WebSocket:', error);
-      this.scheduleReconnect();
+      this.fallbackToLocalSync();
     }
   }
 
-  private register() {
-    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      const deviceInfo = {
-        type: 'register',
-        deviceId: this.deviceId,
-        name: localStorage.getItem('lokal_device_name') || 'Unknown Device',
-        role: localStorage.getItem('lokal_user_role') || 'waiter',
-        timestamp: new Date().toISOString()
-      };
-      this.ws.send(JSON.stringify(deviceInfo));
-    }
+  private fallbackToLocalSync(): void {
+    console.log('Falling back to local storage sync');
+    this.useWebSocket = false;
+    this.isConnected = false;
+    
+    // Use localStorage events for local sync between tabs
+    window.addEventListener('storage', this.handleStorageEvent.bind(this));
   }
 
-  private startPing() {
-    this.pingTimer = setInterval(() => {
-      if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-        const pingStart = Date.now();
-        this.ws.send(JSON.stringify({ type: 'ping', timestamp: pingStart }));
+  private handleStorageEvent(event: StorageEvent): void {
+    if (event.key === 'lokalrestro_sync' && event.newValue) {
+      try {
+        const syncData: SyncData = JSON.parse(event.newValue);
+        if (syncData.deviceId !== this.deviceId) {
+          this.notifyListeners(syncData);
+        }
+      } catch (error) {
+        console.error('Failed to parse storage sync data:', error);
       }
-    }, 15000);
-  }
-
-  private stopPing() {
-    if (this.pingTimer) {
-      clearInterval(this.pingTimer);
-      this.pingTimer = null;
     }
   }
 
-  private scheduleReconnect() {
-    if (!this.reconnectTimer) {
-      this.reconnectTimer = setTimeout(() => {
-        console.log('Attempting to reconnect...');
-        this.connect();
-      }, 10000);
+  private startFallbackSync(): void {
+    // Periodic sync check for localStorage-based sync
+    this.fallbackSyncInterval = setInterval(() => {
+      if (!this.useWebSocket) {
+        this.processLocalSync();
+      }
+    }, 1000);
+  }
+
+  private processLocalSync(): void {
+    // Process any queued sync data when not using WebSocket
+    if (this.syncQueue.length > 0) {
+      const syncData = this.syncQueue.shift();
+      if (syncData) {
+        localStorage.setItem('lokalrestro_sync', JSON.stringify(syncData));
+        localStorage.removeItem('lokalrestro_sync'); // Clear after setting to trigger event
+      }
     }
   }
 
-  private handleMessage(data: any) {
-    switch (data.type) {
+  private processSyncQueue(): void {
+    // Process any queued sync data when connection is restored
+    while (this.syncQueue.length > 0 && this.isConnected) {
+      const syncData = this.syncQueue.shift();
+      if (syncData && this.ws && this.ws.readyState === WebSocket.OPEN) {
+        this.sendMessage({
+          id: this.generateMessageId(),
+          type: 'sync',
+          data: syncData,
+          timestamp: Date.now(),
+          deviceId: this.deviceId
+        });
+      }
+    }
+  }
+
+  private handleMessage(message: SyncMessage): void {
+    switch (message.type) {
       case 'sync':
-        this.listeners.forEach(listener => listener(data));
+        if (message.data && message.deviceId !== this.deviceId) {
+          this.notifyListeners(message.data);
+        }
         break;
-      case 'devices':
-        this.connectedDevices = data.devices;
+      case 'heartbeat':
+        this.connectedDevices.add(message.deviceId);
         break;
-      case 'pong':
-        const ping = Date.now() - data.timestamp;
-        console.log(`Ping: ${ping}ms`);
+      case 'discovery':
+        this.connectedDevices.add(message.deviceId);
+        this.sendHeartbeat();
         break;
     }
   }
 
-  sync(syncData: Omit<SyncData, 'deviceId' | 'timestamp'>) {
-    const fullSyncData: SyncData = {
-      ...syncData,
-      deviceId: this.deviceId,
-      timestamp: new Date().toISOString()
-    };
-
-    // Store locally first
-    this.storeLocal(fullSyncData);
-
-    // Send to network if connected
+  private sendMessage(message: SyncMessage): void {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify({ type: 'sync', ...fullSyncData }));
+      this.ws.send(JSON.stringify(message));
     }
   }
 
-  private storeLocal(syncData: SyncData) {
-    const syncQueue = JSON.parse(localStorage.getItem('lokal_sync_queue') || '[]');
-    syncQueue.push(syncData);
-    localStorage.setItem('lokal_sync_queue', JSON.stringify(syncQueue));
+  private sendDiscovery(): void {
+    this.sendMessage({
+      id: this.generateMessageId(),
+      type: 'discovery',
+      data: null,
+      timestamp: Date.now(),
+      deviceId: this.deviceId
+    });
   }
 
-  onSync(listener: (data: SyncData) => void) {
-    this.listeners.push(listener);
+  private startHeartbeat(): void {
+    this.heartbeatInterval = setInterval(() => {
+      this.sendHeartbeat();
+    }, 30000); // Send heartbeat every 30 seconds
+  }
+
+  private sendHeartbeat(): void {
+    this.sendMessage({
+      id: this.generateMessageId(),
+      type: 'heartbeat',
+      data: null,
+      timestamp: Date.now(),
+      deviceId: this.deviceId
+    });
+  }
+
+  private scheduleReconnect(): void {
+    if (this.reconnectInterval) {
+      clearInterval(this.reconnectInterval);
+    }
+    
+    this.reconnectInterval = setInterval(() => {
+      console.log('Attempting to reconnect...');
+      this.connect();
+    }, 10000); // Try to reconnect every 10 seconds
+  }
+
+  private generateMessageId(): string {
+    return `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  }
+
+  private notifyListeners(data: SyncData): void {
+    this.syncListeners.forEach(listener => {
+      try {
+        listener(data);
+      } catch (error) {
+        console.error('Sync listener error:', error);
+      }
+    });
+  }
+
+  // Public API
+  broadcast(data: SyncData): void {
+    if (this.useWebSocket && this.isConnected) {
+      this.sendMessage({
+        id: this.generateMessageId(),
+        type: 'sync',
+        data,
+        timestamp: Date.now(),
+        deviceId: this.deviceId
+      });
+    } else {
+      // Queue for later or use localStorage
+      this.syncQueue.push(data);
+      if (!this.useWebSocket) {
+        localStorage.setItem('lokalrestro_sync', JSON.stringify(data));
+        setTimeout(() => localStorage.removeItem('lokalrestro_sync'), 100);
+      }
+    }
+  }
+
+  onSync(listener: (data: SyncData) => void): () => void {
+    this.syncListeners.push(listener);
     return () => {
-      this.listeners = this.listeners.filter(l => l !== listener);
+      this.syncListeners = this.syncListeners.filter(l => l !== listener);
     };
   }
 
-  getConnectedDevices(): ConnectedDevice[] {
-    return this.connectedDevices;
+  getConnectedDevices(): string[] {
+    return Array.from(this.connectedDevices);
   }
 
-  pingAllDevices() {
-    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify({ type: 'ping_all' }));
-    }
+  getDeviceId(): string {
+    return this.deviceId;
   }
 
-  disconnect() {
-    this.stopPing();
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer);
-    }
+  isOnline(): boolean {
+    return this.isConnected;
+  }
+
+  getSyncStatus(): { online: boolean; method: string; devices: number } {
+    return {
+      online: this.isConnected || !this.useWebSocket,
+      method: this.useWebSocket ? 'WebSocket' : 'LocalStorage',
+      devices: this.connectedDevices.size
+    };
+  }
+
+  disconnect(): void {
     if (this.ws) {
       this.ws.close();
+      this.ws = null;
     }
+    
+    if (this.reconnectInterval) {
+      clearInterval(this.reconnectInterval);
+    }
+    
+    if (this.heartbeatInterval) {
+      clearInterval(this.heartbeatInterval);
+    }
+    
+    if (this.fallbackSyncInterval) {
+      clearInterval(this.fallbackSyncInterval);
+    }
+    
+    window.removeEventListener('storage', this.handleStorageEvent.bind(this));
+    
+    this.isConnected = false;
+    this.connectedDevices.clear();
+  }
+
+  // Network discovery methods
+  async discoverDevices(): Promise<string[]> {
+    // Simulate network device discovery
+    return new Promise((resolve) => {
+      setTimeout(() => {
+        const simulatedDevices = [
+          'LokalRestro-Kitchen-001',
+          'LokalRestro-Counter-002',
+          'LokalRestro-Mobile-003'
+        ];
+        resolve(simulatedDevices);
+      }, 1000);
+    });
+  }
+
+  async pingDevice(deviceId: string): Promise<number> {
+    // Simulate device ping
+    return new Promise((resolve) => {
+      setTimeout(() => {
+        resolve(Math.random() * 100 + 10); // Random ping between 10-110ms
+      }, 100);
+    });
   }
 }
 
 export const syncService = new SyncService();
+export type { SyncData, SyncMessage };

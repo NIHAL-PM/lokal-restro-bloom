@@ -1,4 +1,5 @@
-import { useState } from "react";
+
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -7,178 +8,282 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Plus, Search, Clock, CheckCircle, AlertCircle, Edit } from "lucide-react";
+import { Plus, Search, Clock, CheckCircle, AlertCircle, Edit, Trash2, Users, Bed } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-
-interface OrderItem {
-  id?: string;
-  name: string;
-  quantity: number;
-  price: number;
-  notes?: string;
-}
-
-interface Order {
-  id: string;
-  type: string;
-  table?: string;
-  room?: string;
-  waiter: string;
-  items: OrderItem[];
-  total: number;
-  status: string;
-  timestamp: string;
-  notes: string;
-}
+import { databaseService } from "@/services/databaseService";
+import { syncService } from "@/services/syncService";
+import { soundService } from "@/services/soundService";
+import type { Order, OrderItem, MenuItem, Table, Room } from "@/services/databaseService";
 
 export function OrderManagement() {
   const { toast } = useToast();
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedType, setSelectedType] = useState("all");
-  
-  const [orders, setOrders] = useState<Order[]>([
-    {
-      id: "ORD-001",
-      type: "dine-in",
-      table: "T5",
-      waiter: "John Doe",
-      items: [
-        { name: "Butter Chicken", quantity: 2, price: 350, notes: "Medium spicy" },
-        { name: "Naan", quantity: 3, price: 50 }
-      ],
-      total: 850,
-      status: "preparing",
-      timestamp: new Date().toISOString(),
-      notes: "Customer requested extra napkins"
-    },
-    {
-      id: "ORD-002",
-      type: "room-service",
-      room: "R101",
-      waiter: "Jane Smith",
-      items: [
-        { name: "Club Sandwich", quantity: 1, price: 280 },
-        { name: "Fresh Juice", quantity: 2, price: 120 }
-      ],
-      total: 520,
-      status: "ready",
-      timestamp: new Date(Date.now() - 300000).toISOString(),
-      notes: ""
-    }
-  ]);
-
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
+  const [tables, setTables] = useState<Table[]>([]);
+  const [rooms, setRooms] = useState<Room[]>([]);
+  const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [newOrder, setNewOrder] = useState({
-    type: "dine-in",
-    location: "",
-    items: [] as OrderItem[],
-    notes: "",
-    waiter: "Current User"
+    type: 'dine-in' as 'dine-in' | 'takeaway' | 'room-service',
+    tableId: '',
+    roomId: '',
+    waiterId: 'current-user',
+    notes: ''
   });
+  const [selectedItems, setSelectedItems] = useState<OrderItem[]>([]);
 
-  const [showNewOrderDialog, setShowNewOrderDialog] = useState(false);
+  useEffect(() => {
+    const data = databaseService.getData();
+    setOrders(data.orders);
+    setMenuItems(data.menuItems);
+    setTables(data.tables);
+    setRooms(data.rooms);
 
-  const menuItems = [
-    { id: "1", name: "Butter Chicken", price: 350, category: "Main Course" },
-    { id: "2", name: "Paneer Tikka", price: 320, category: "Main Course" },
-    { id: "3", name: "Naan", price: 50, category: "Bread" },
-    { id: "4", name: "Biryani", price: 450, category: "Rice" },
-    { id: "5", name: "Fresh Juice", price: 120, category: "Beverages" }
-  ];
+    const unsubscribe = databaseService.subscribe((data) => {
+      setOrders(data.orders);
+      setMenuItems(data.menuItems);
+      setTables(data.tables);
+      setRooms(data.rooms);
+    });
+
+    return unsubscribe;
+  }, []);
+
+  const addItemToOrder = (menuItem: MenuItem) => {
+    const existingItemIndex = selectedItems.findIndex(item => item.menuItemId === menuItem.id);
+    
+    if (existingItemIndex !== -1) {
+      setSelectedItems(prev => prev.map((item, index) => 
+        index === existingItemIndex 
+          ? { ...item, quantity: item.quantity + 1 }
+          : item
+      ));
+    } else {
+      setSelectedItems(prev => [...prev, {
+        menuItemId: menuItem.id,
+        name: menuItem.name,
+        quantity: 1,
+        price: menuItem.price,
+        modifiers: [],
+        status: 'pending'
+      }]);
+    }
+  };
+
+  const removeItemFromOrder = (index: number) => {
+    setSelectedItems(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const updateItemQuantity = (index: number, quantity: number) => {
+    if (quantity <= 0) {
+      removeItemFromOrder(index);
+      return;
+    }
+    
+    setSelectedItems(prev => prev.map((item, i) => 
+      i === index ? { ...item, quantity } : item
+    ));
+  };
+
+  const calculateOrderTotal = () => {
+    const subtotal = selectedItems.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+    const serviceCharge = (subtotal * 10) / 100; // 10% service charge
+    const tax = ((subtotal + serviceCharge) * 18) / 100; // 18% GST
+    return {
+      subtotal,
+      serviceCharge,
+      tax,
+      total: subtotal + serviceCharge + tax
+    };
+  };
 
   const handleCreateOrder = () => {
-    if (!newOrder.location || newOrder.items.length === 0) {
+    if (selectedItems.length === 0) {
       toast({
-        title: "Incomplete Order",
-        description: "Please select location and add items",
+        title: "No Items Selected",
+        description: "Please add items to the order",
         variant: "destructive"
       });
       return;
     }
 
-    const order: Order = {
-      id: `ORD-${String(orders.length + 1).padStart(3, '0')}`,
-      type: newOrder.type,
-      ...(newOrder.type === "room-service" ? { room: newOrder.location } : { table: newOrder.location }),
-      waiter: newOrder.waiter,
-      items: newOrder.items,
-      notes: newOrder.notes,
-      total: newOrder.items.reduce((sum, item) => sum + (item.price * item.quantity), 0),
-      status: "pending",
-      timestamp: new Date().toISOString()
-    };
-
-    setOrders(prev => [order, ...prev]);
-    setNewOrder({ type: "dine-in", location: "", items: [], notes: "", waiter: "Current User" });
-    setShowNewOrderDialog(false);
-    
-    // Play order sound
-    if (window.playLokalSound) {
-      window.playLokalSound("order");
+    if (newOrder.type === 'dine-in' && !newOrder.tableId) {
+      toast({
+        title: "Table Required",
+        description: "Please select a table for dine-in orders",
+        variant: "destructive"
+      });
+      return;
     }
+
+    if (newOrder.type === 'room-service' && !newOrder.roomId) {
+      toast({
+        title: "Room Required",
+        description: "Please select a room for room service orders",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    const totals = calculateOrderTotal();
+    
+    const order = databaseService.createOrder({
+      type: newOrder.type,
+      tableId: newOrder.type === 'dine-in' ? newOrder.tableId : undefined,
+      roomId: newOrder.type === 'room-service' ? newOrder.roomId : undefined,
+      items: selectedItems,
+      status: 'pending',
+      waiterId: newOrder.waiterId,
+      timestamp: new Date().toISOString(),
+      notes: newOrder.notes,
+      subtotal: totals.subtotal,
+      tax: totals.tax,
+      serviceCharge: totals.serviceCharge,
+      discount: 0,
+      total: totals.total
+    });
+
+    // Update table/room status
+    if (newOrder.type === 'dine-in' && newOrder.tableId) {
+      databaseService.updateTable(newOrder.tableId, {
+        status: 'occupied',
+        currentOrderId: order.id,
+        occupiedSince: new Date().toISOString()
+      });
+    }
+
+    if (newOrder.type === 'room-service' && newOrder.roomId) {
+      const room = rooms.find(r => r.id === newOrder.roomId);
+      if (room) {
+        databaseService.updateRoom(newOrder.roomId, {
+          orderIds: [...room.orderIds, order.id]
+        });
+      }
+    }
+
+    // Sync order creation
+    syncService.broadcast({
+      type: 'order',
+      action: 'create',
+      data: order,
+      timestamp: Date.now(),
+      deviceId: syncService.getDeviceId()
+    });
+
+    // Play sound notification
+    soundService.playNewOrderChime();
 
     toast({
       title: "Order Created",
-      description: `Order ${order.id} has been sent to kitchen`,
+      description: `Order ${order.id} has been created successfully`,
+    });
+
+    // Reset form
+    setNewOrder({
+      type: 'dine-in',
+      tableId: '',
+      roomId: '',
+      waiterId: 'current-user',
+      notes: ''
+    });
+    setSelectedItems([]);
+    setShowCreateDialog(false);
+  };
+
+  const updateOrderStatus = (orderId: string, newStatus: Order['status']) => {
+    databaseService.updateOrder(orderId, { status: newStatus });
+    
+    syncService.broadcast({
+      type: 'order',
+      action: 'update',
+      data: { id: orderId, status: newStatus },
+      timestamp: Date.now(),
+      deviceId: syncService.getDeviceId()
+    });
+
+    if (newStatus === 'ready') {
+      soundService.playOrderReadyChime();
+    }
+
+    toast({
+      title: "Order Updated",
+      description: `Order ${orderId} marked as ${newStatus}`,
     });
   };
 
-  const addItemToOrder = (menuItem: any) => {
-    const existingItem = newOrder.items.find(item => item.id === menuItem.id);
-    if (existingItem) {
-      setNewOrder(prev => ({
-        ...prev,
-        items: prev.items.map(item => 
-          item.id === menuItem.id 
-            ? { ...item, quantity: item.quantity + 1 }
-            : item
-        )
-      }));
-    } else {
-      setNewOrder(prev => ({
-        ...prev,
-        items: [...prev.items, { ...menuItem, quantity: 1, notes: "" }]
-      }));
+  const deleteOrder = (orderId: string) => {
+    const order = orders.find(o => o.id === orderId);
+    if (!order) return;
+
+    // Free up table/room
+    if (order.tableId) {
+      databaseService.updateTable(order.tableId, {
+        status: 'free',
+        currentOrderId: undefined,
+        occupiedSince: undefined
+      });
     }
+
+    if (order.roomId) {
+      const room = rooms.find(r => r.id === order.roomId);
+      if (room) {
+        databaseService.updateRoom(order.roomId, {
+          orderIds: room.orderIds.filter(id => id !== orderId)
+        });
+      }
+    }
+
+    const updatedOrders = orders.filter(o => o.id !== orderId);
+    databaseService.updateData({ orders: updatedOrders });
+
+    syncService.broadcast({
+      type: 'order',
+      action: 'delete',
+      data: { id: orderId },
+      timestamp: Date.now(),
+      deviceId: syncService.getDeviceId()
+    });
+
+    toast({
+      title: "Order Deleted",
+      description: `Order ${orderId} has been removed`,
+    });
   };
 
-  const getStatusColor = (status: string) => {
+  const getStatusColor = (status: Order['status']) => {
     switch (status) {
-      case "pending": return "bg-yellow-100 text-yellow-800";
-      case "preparing": return "bg-blue-100 text-blue-800";
+      case "pending": return "bg-red-100 text-red-800";
+      case "preparing": return "bg-yellow-100 text-yellow-800";
       case "ready": return "bg-green-100 text-green-800";
-      case "served": return "bg-gray-100 text-gray-800";
+      case "served": return "bg-blue-100 text-blue-800";
+      case "cancelled": return "bg-gray-100 text-gray-800";
       default: return "bg-gray-100 text-gray-800";
-    }
-  };
-
-  const getStatusIcon = (status: string) => {
-    switch (status) {
-      case "pending": return <Clock className="h-4 w-4" />;
-      case "preparing": return <AlertCircle className="h-4 w-4" />;
-      case "ready": return <CheckCircle className="h-4 w-4" />;
-      default: return <Clock className="h-4 w-4" />;
     }
   };
 
   const filteredOrders = orders.filter(order => {
     const matchesSearch = order.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         (order.table && order.table.toLowerCase().includes(searchTerm.toLowerCase())) ||
-                         (order.room && order.room.toLowerCase().includes(searchTerm.toLowerCase()));
+                         (order.tableId && order.tableId.toLowerCase().includes(searchTerm.toLowerCase())) ||
+                         (order.roomId && order.roomId.toLowerCase().includes(searchTerm.toLowerCase()));
     const matchesType = selectedType === "all" || order.type === selectedType;
     return matchesSearch && matchesType;
   });
+
+  const availableTables = tables.filter(table => table.status === 'free');
+  const availableRooms = rooms.filter(room => room.status === 'occupied' && room.guest);
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold text-gray-900">Order Management</h1>
-          <p className="text-gray-500 mt-1">Create and track customer orders</p>
+          <p className="text-gray-500 mt-1">Create and manage customer orders</p>
         </div>
         
-        <Dialog open={showNewOrderDialog} onOpenChange={setShowNewOrderDialog}>
+        <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
           <DialogTrigger asChild>
-            <Button className="bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700">
+            <Button className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700">
               <Plus className="h-4 w-4 mr-2" />
               New Order
             </Button>
@@ -189,11 +294,12 @@ export function OrderManagement() {
               <DialogDescription>Add items and details for the new order</DialogDescription>
             </DialogHeader>
             
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Order Details */}
               <div className="space-y-4">
                 <div>
                   <Label>Order Type</Label>
-                  <Select value={newOrder.type} onValueChange={(value) => setNewOrder(prev => ({ ...prev, type: value }))}>
+                  <Select value={newOrder.type} onValueChange={(value: 'dine-in' | 'takeaway' | 'room-service') => setNewOrder(prev => ({ ...prev, type: value }))}>
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
@@ -205,54 +311,131 @@ export function OrderManagement() {
                   </Select>
                 </div>
 
-                <div>
-                  <Label>{newOrder.type === "room-service" ? "Room Number" : "Table Number"}</Label>
-                  <Input
-                    value={newOrder.location}
-                    onChange={(e) => setNewOrder(prev => ({ ...prev, location: e.target.value }))}
-                    placeholder={newOrder.type === "room-service" ? "e.g., R101" : "e.g., T5"}
-                  />
-                </div>
+                {newOrder.type === 'dine-in' && (
+                  <div>
+                    <Label>Table</Label>
+                    <Select value={newOrder.tableId} onValueChange={(value) => setNewOrder(prev => ({ ...prev, tableId: value }))}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select table" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {availableTables.map((table) => (
+                          <SelectItem key={table.id} value={table.id}>
+                            Table {table.number} (Capacity: {table.capacity})
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+
+                {newOrder.type === 'room-service' && (
+                  <div>
+                    <Label>Room</Label>
+                    <Select value={newOrder.roomId} onValueChange={(value) => setNewOrder(prev => ({ ...prev, roomId: value }))}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select room" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {availableRooms.map((room) => (
+                          <SelectItem key={room.id} value={room.id}>
+                            {room.number} - {room.guest?.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
 
                 <div>
-                  <Label>Special Notes</Label>
+                  <Label>Notes</Label>
                   <Textarea
                     value={newOrder.notes}
                     onChange={(e) => setNewOrder(prev => ({ ...prev, notes: e.target.value }))}
-                    placeholder="Any special instructions..."
-                    rows={3}
+                    placeholder="Special instructions..."
                   />
                 </div>
 
-                {newOrder.items.length > 0 && (
-                  <div>
-                    <Label>Order Summary</Label>
-                    <div className="space-y-2 mt-2">
-                      {newOrder.items.map((item, index) => (
-                        <div key={index} className="flex justify-between items-center p-2 bg-gray-50 rounded">
-                          <span>{item.name} x{item.quantity}</span>
-                          <span>₹{item.price * item.quantity}</span>
+                {/* Selected Items */}
+                <div>
+                  <Label>Selected Items</Label>
+                  <div className="space-y-2 max-h-40 overflow-y-auto">
+                    {selectedItems.map((item, index) => (
+                      <div key={index} className="flex items-center justify-between p-2 bg-gray-50 rounded">
+                        <div className="flex-1">
+                          <span className="font-medium">{item.name}</span>
+                          <span className="text-sm text-gray-500 ml-2">₹{item.price}</span>
                         </div>
-                      ))}
-                      <div className="font-bold text-lg pt-2 border-t">
-                        Total: ₹{newOrder.items.reduce((sum, item) => sum + (item.price * item.quantity), 0)}
+                        <div className="flex items-center space-x-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => updateItemQuantity(index, item.quantity - 1)}
+                          >
+                            -
+                          </Button>
+                          <span className="w-8 text-center">{item.quantity}</span>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => updateItemQuantity(index, item.quantity + 1)}
+                          >
+                            +
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => removeItemFromOrder(index)}
+                            className="text-red-600"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  
+                  {selectedItems.length > 0 && (
+                    <div className="mt-3 p-3 bg-blue-50 rounded">
+                      <div className="text-sm space-y-1">
+                        <div className="flex justify-between">
+                          <span>Subtotal:</span>
+                          <span>₹{calculateOrderTotal().subtotal.toFixed(2)}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>Service Charge (10%):</span>
+                          <span>₹{calculateOrderTotal().serviceCharge.toFixed(2)}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>Tax (18%):</span>
+                          <span>₹{calculateOrderTotal().tax.toFixed(2)}</span>
+                        </div>
+                        <div className="flex justify-between font-bold text-lg border-t pt-1">
+                          <span>Total:</span>
+                          <span>₹{calculateOrderTotal().total.toFixed(2)}</span>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                )}
+                  )}
+                </div>
               </div>
 
+              {/* Menu Items */}
               <div>
-                <Label>Menu Items</Label>
-                <div className="grid grid-cols-1 gap-2 mt-2 max-h-96 overflow-y-auto">
-                  {menuItems.map((item) => (
-                    <div key={item.id} className="flex justify-between items-center p-3 border rounded-lg hover:bg-gray-50">
-                      <div>
-                        <p className="font-medium">{item.name}</p>
-                        <p className="text-sm text-gray-500">{item.category}</p>
-                        <p className="text-sm font-semibold text-green-600">₹{item.price}</p>
+                <Label>Add Menu Items</Label>
+                <div className="space-y-2 max-h-96 overflow-y-auto">
+                  {menuItems.filter(item => item.available).map((item) => (
+                    <div
+                      key={item.id}
+                      className="flex items-center justify-between p-3 border rounded cursor-pointer hover:bg-gray-50"
+                      onClick={() => addItemToOrder(item)}
+                    >
+                      <div className="flex-1">
+                        <h4 className="font-medium">{item.name}</h4>
+                        <p className="text-sm text-gray-500">{item.description}</p>
+                        <p className="text-sm text-green-600 font-semibold">₹{item.price}</p>
                       </div>
-                      <Button size="sm" onClick={() => addItemToOrder(item)}>
+                      <Button size="sm">
                         <Plus className="h-4 w-4" />
                       </Button>
                     </div>
@@ -262,10 +445,10 @@ export function OrderManagement() {
             </div>
 
             <div className="flex justify-end space-x-2 pt-4">
-              <Button variant="outline" onClick={() => setShowNewOrderDialog(false)}>
+              <Button variant="outline" onClick={() => setShowCreateDialog(false)}>
                 Cancel
               </Button>
-              <Button onClick={handleCreateOrder}>
+              <Button onClick={handleCreateOrder} disabled={selectedItems.length === 0}>
                 Create Order
               </Button>
             </div>
@@ -287,7 +470,7 @@ export function OrderManagement() {
           </div>
         </div>
         <Select value={selectedType} onValueChange={setSelectedType}>
-          <SelectTrigger className="w-40">
+          <SelectTrigger className="w-48">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -299,50 +482,81 @@ export function OrderManagement() {
         </Select>
       </div>
 
-      {/* Orders List */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      {/* Orders Grid */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
         {filteredOrders.map((order) => (
           <Card key={order.id} className="border-0 shadow-lg hover:shadow-xl transition-shadow">
-            <CardHeader>
+            <CardHeader className="pb-3">
               <div className="flex items-center justify-between">
                 <CardTitle className="text-lg">{order.id}</CardTitle>
                 <Badge className={getStatusColor(order.status)}>
-                  {getStatusIcon(order.status)}
-                  <span className="ml-1 capitalize">{order.status}</span>
+                  {order.status}
                 </Badge>
               </div>
-              <CardDescription>
-                {order.type === "room-service" ? `Room ${order.room}` : `Table ${order.table}`} • 
-                Waiter: {order.waiter} • 
-                {new Date(order.timestamp).toLocaleTimeString()}
+              <CardDescription className="flex items-center">
+                {order.type === 'room-service' ? (
+                  <><Bed className="h-4 w-4 mr-1" /> Room {order.roomId}</>
+                ) : order.type === 'dine-in' ? (
+                  <><Users className="h-4 w-4 mr-1" /> Table {order.tableId}</>
+                ) : (
+                  <>Takeaway</>
+                )}
+                <span className="ml-2">• {new Date(order.timestamp).toLocaleTimeString()}</span>
               </CardDescription>
             </CardHeader>
-            <CardContent>
-              <div className="space-y-3">
-                <div>
-                  <h4 className="font-medium mb-2">Items:</h4>
-                  <div className="space-y-1">
-                    {order.items.map((item, index) => (
-                      <div key={index} className="flex justify-between text-sm">
-                        <span>{item.name} x{item.quantity}</span>
-                        <span>₹{item.price * item.quantity}</span>
-                      </div>
-                    ))}
+            
+            <CardContent className="space-y-3">
+              <div className="space-y-2">
+                {order.items.map((item, index) => (
+                  <div key={index} className="flex justify-between text-sm">
+                    <span>{item.name} x{item.quantity}</span>
+                    <span>₹{(item.price * item.quantity).toFixed(2)}</span>
                   </div>
+                ))}
+              </div>
+              
+              {order.notes && (
+                <div className="text-sm text-gray-600 p-2 bg-gray-50 rounded">
+                  <strong>Notes:</strong> {order.notes}
                 </div>
-                
-                {order.notes && (
-                  <div>
-                    <h4 className="font-medium mb-1">Notes:</h4>
-                    <p className="text-sm text-gray-600">{order.notes}</p>
-                  </div>
-                )}
-                
-                <div className="flex justify-between items-center pt-3 border-t">
-                  <span className="text-lg font-bold">Total: ₹{order.total}</span>
-                  <Button variant="outline" size="sm">
-                    <Edit className="h-4 w-4 mr-1" />
-                    Edit
+              )}
+              
+              <div className="flex justify-between items-center pt-2 border-t">
+                <span className="font-semibold">Total: ₹{order.total.toFixed(2)}</span>
+                <div className="flex space-x-2">
+                  {order.status === 'pending' && (
+                    <Button
+                      size="sm"
+                      onClick={() => updateOrderStatus(order.id, 'preparing')}
+                      className="bg-yellow-600 hover:bg-yellow-700"
+                    >
+                      Start Preparing
+                    </Button>
+                  )}
+                  {order.status === 'preparing' && (
+                    <Button
+                      size="sm"
+                      onClick={() => updateOrderStatus(order.id, 'ready')}
+                      className="bg-green-600 hover:bg-green-700"
+                    >
+                      Mark Ready
+                    </Button>
+                  )}
+                  {order.status === 'ready' && (
+                    <Button
+                      size="sm"
+                      onClick={() => updateOrderStatus(order.id, 'served')}
+                    >
+                      Mark Served
+                    </Button>
+                  )}
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => deleteOrder(order.id)}
+                    className="text-red-600 hover:text-red-700"
+                  >
+                    <Trash2 className="h-4 w-4" />
                   </Button>
                 </div>
               </div>
