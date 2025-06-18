@@ -3,341 +3,432 @@ import { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Separator } from "@/components/ui/separator";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { 
-  Activity,
-  Database,
+  Server, 
+  Printer, 
+  Download, 
+  Upload, 
+  MonitorCheck,
   Wifi,
-  Users,
+  RefreshCw,
   AlertTriangle,
   CheckCircle,
   Clock,
-  Download
+  HardDrive
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { syncService } from "@/services/syncService";
-import { backupService } from "@/services/backupService";
+import { syncService, ConnectedDevice } from "@/services/syncService";
+import { printerService } from "@/services/printerService";
+import { backupService, BackupData } from "@/services/backupService";
+import { databaseService } from "@/services/databaseService";
 
 export function AdminTools() {
   const { toast } = useToast();
-  const [devices, setDevices] = useState(syncService.getConnectedDevices());
+  const [connectedDevices, setConnectedDevices] = useState<ConnectedDevice[]>([]);
   const [syncLogs, setSyncLogs] = useState<any[]>([]);
-  const [systemStatus, setSystemStatus] = useState({
-    database: 'online',
-    websocket: 'online',
-    printer: 'unknown',
-    lastBackup: new Date().toISOString()
+  const [showBackupDialog, setShowBackupDialog] = useState(false);
+  const [showRestoreDialog, setShowRestoreDialog] = useState(false);
+  const [pendingRestore, setPendingRestore] = useState<BackupData | null>(null);
+  const [systemStats, setSystemStats] = useState({
+    totalOrders: 0,
+    totalRevenue: 0,
+    activeDevices: 0,
+    uptime: '0h 0m'
   });
 
   useEffect(() => {
-    // Load sync logs from localStorage
-    const logs = JSON.parse(localStorage.getItem('lokal_sync_logs') || '[]');
-    setSyncLogs(logs.slice(-50)); // Show last 50 logs
-
-    // Set up device monitoring
-    const interval = setInterval(() => {
-      setDevices(syncService.getConnectedDevices());
-    }, 5000);
-
-    return () => clearInterval(interval);
-  }, []);
-
-  const handlePingAll = () => {
-    syncService.pingAllDevices();
-    toast({
-      title: "Pinging All Devices",
-      description: "Testing connectivity to all connected devices...",
-    });
-  };
-
-  const handleExportLogs = () => {
-    const logsData = {
-      exportDate: new Date().toISOString(),
-      systemStatus,
-      connectedDevices: devices,
-      syncLogs,
-      localStorage: {
-        orders: JSON.parse(localStorage.getItem('lokal_orders') || '[]').length,
-        menu: JSON.parse(localStorage.getItem('lokal_menu') || '[]').length,
-        tables: JSON.parse(localStorage.getItem('lokal_tables') || '[]').length,
-        rooms: JSON.parse(localStorage.getItem('lokal_rooms') || '[]').length
-      }
+    const updateDevices = () => {
+      setConnectedDevices(syncService.getConnectedDevices());
     };
 
-    const blob = new Blob([JSON.stringify(logsData, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `admin-logs-${Date.now()}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
+    const updateStats = () => {
+      const data = databaseService.getData();
+      const totalRevenue = data.transactions.reduce((sum, txn) => sum + txn.amount, 0);
+      
+      setSystemStats({
+        totalOrders: data.orders.length,
+        totalRevenue,
+        activeDevices: connectedDevices.length,
+        uptime: getUptime()
+      });
+    };
 
+    const updateLogs = () => {
+      const data = databaseService.getData();
+      setSyncLogs(data.syncLog.slice(-50).reverse());
+    };
+
+    const interval = setInterval(() => {
+      updateDevices();
+      updateStats();
+      updateLogs();
+    }, 5000);
+
+    updateDevices();
+    updateStats();
+    updateLogs();
+
+    return () => clearInterval(interval);
+  }, [connectedDevices.length]);
+
+  useEffect(() => {
+    const pending = backupService.getPendingRestore();
+    setPendingRestore(pending);
+  }, []);
+
+  const getUptime = () => {
+    const startTime = localStorage.getItem('lokal_start_time');
+    if (!startTime) {
+      localStorage.setItem('lokal_start_time', Date.now().toString());
+      return '0h 0m';
+    }
+    
+    const uptime = Date.now() - parseInt(startTime);
+    const hours = Math.floor(uptime / (1000 * 60 * 60));
+    const minutes = Math.floor((uptime % (1000 * 60 * 60)) / (1000 * 60));
+    return `${hours}h ${minutes}m`;
+  };
+
+  const handleTestPrinter = async () => {
+    const success = await printerService.testPrinter();
+    
     toast({
-      title: "Logs Exported",
-      description: "System logs have been downloaded successfully",
+      title: success ? "Printer Test Successful" : "Printer Test Failed",
+      description: success 
+        ? "Test receipt sent to printer successfully" 
+        : "Failed to connect to printer. Check configuration.",
+      variant: success ? "default" : "destructive"
     });
   };
 
-  const handleClearData = (dataType: string) => {
-    if (confirm(`Are you sure you want to clear all ${dataType} data? This cannot be undone.`)) {
-      localStorage.removeItem(`lokal_${dataType}`);
+  const handlePingAllDevices = () => {
+    syncService.pingAllDevices();
+    toast({
+      title: "Ping Sent",
+      description: "Pinging all devices on the network",
+    });
+  };
+
+  const handleBackupNow = async () => {
+    try {
+      await backupService.downloadBackup();
       toast({
-        title: "Data Cleared",
-        description: `All ${dataType} data has been cleared`,
+        title: "Backup Created",
+        description: "System backup downloaded successfully",
+      });
+    } catch (error) {
+      toast({
+        title: "Backup Failed",
+        description: (error as Error).message,
         variant: "destructive"
       });
     }
   };
 
-  const getStatusBadge = (status: string) => {
-    switch (status) {
-      case 'online':
-        return <Badge className="bg-green-100 text-green-800"><CheckCircle className="h-3 w-3 mr-1" />Online</Badge>;
-      case 'offline':
-        return <Badge className="bg-red-100 text-red-800"><AlertTriangle className="h-3 w-3 mr-1" />Offline</Badge>;
-      default:
-        return <Badge className="bg-yellow-100 text-yellow-800"><Clock className="h-3 w-3 mr-1" />Unknown</Badge>;
+  const handleRestoreFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    try {
+      await backupService.restoreBackup(file);
+      const pending = backupService.getPendingRestore();
+      setPendingRestore(pending);
+      setShowRestoreDialog(true);
+    } catch (error) {
+      toast({
+        title: "Invalid Backup File",
+        description: (error as Error).message,
+        variant: "destructive"
+      });
+    }
+  };
+
+  const handleConfirmRestore = async () => {
+    try {
+      await backupService.confirmRestore();
+      setPendingRestore(null);
+      setShowRestoreDialog(false);
+      
+      toast({
+        title: "Restore Completed",
+        description: "System restored successfully. Refreshing...",
+      });
+      
+      setTimeout(() => window.location.reload(), 2000);
+    } catch (error) {
+      toast({
+        title: "Restore Failed",
+        description: (error as Error).message,
+        variant: "destructive"
+      });
+    }
+  };
+
+  const handleCancelRestore = () => {
+    backupService.cancelRestore();
+    setPendingRestore(null);
+    setShowRestoreDialog(false);
+  };
+
+  const getDeviceStatusColor = (status: string) => {
+    return status === 'online' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800';
+  };
+
+  const getLogTypeColor = (type: string) => {
+    switch (type) {
+      case 'sync': return 'bg-blue-100 text-blue-800';
+      case 'error': return 'bg-red-100 text-red-800';
+      case 'conflict': return 'bg-yellow-100 text-yellow-800';
+      default: return 'bg-gray-100 text-gray-800';
     }
   };
 
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">Admin Tools</h1>
-        <p className="text-gray-500 dark:text-gray-400 mt-1">System monitoring and administration</p>
+        <h1 className="text-3xl font-bold text-gray-900">Admin Tools</h1>
+        <p className="text-gray-500 mt-1">System monitoring and maintenance tools</p>
       </div>
 
-      <Tabs defaultValue="overview" className="w-full">
-        <TabsList className="grid w-full grid-cols-4">
-          <TabsTrigger value="overview">Overview</TabsTrigger>
-          <TabsTrigger value="devices">Devices</TabsTrigger>
-          <TabsTrigger value="logs">Sync Logs</TabsTrigger>
-          <TabsTrigger value="maintenance">Maintenance</TabsTrigger>
-        </TabsList>
+      {/* System Stats */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+        <Card className="border-0 shadow-lg">
+          <CardContent className="p-6">
+            <div className="flex items-center">
+              <HardDrive className="h-8 w-8 text-blue-600" />
+              <div className="ml-4">
+                <p className="text-sm font-medium text-gray-600">Total Orders</p>
+                <p className="text-2xl font-bold text-gray-900">{systemStats.totalOrders}</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
 
-        <TabsContent value="overview" className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-            <Card className="border-0 shadow-lg">
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Database</CardTitle>
-                <Database className="h-4 w-4 text-blue-600" />
-              </CardHeader>
-              <CardContent>
-                {getStatusBadge(systemStatus.database)}
-                <p className="text-xs text-gray-500 mt-2">Local storage active</p>
-              </CardContent>
-            </Card>
+        <Card className="border-0 shadow-lg">
+          <CardContent className="p-6">
+            <div className="flex items-center">
+              <Server className="h-8 w-8 text-green-600" />
+              <div className="ml-4">
+                <p className="text-sm font-medium text-gray-600">Revenue</p>
+                <p className="text-2xl font-bold text-gray-900">₹{systemStats.totalRevenue.toLocaleString()}</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
 
-            <Card className="border-0 shadow-lg">
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">WebSocket</CardTitle>
-                <Wifi className="h-4 w-4 text-green-600" />
-              </CardHeader>
-              <CardContent>
-                {getStatusBadge(systemStatus.websocket)}
-                <p className="text-xs text-gray-500 mt-2">LAN sync enabled</p>
-              </CardContent>
-            </Card>
+        <Card className="border-0 shadow-lg">
+          <CardContent className="p-6">
+            <div className="flex items-center">
+              <Wifi className="h-8 w-8 text-purple-600" />
+              <div className="ml-4">
+                <p className="text-sm font-medium text-gray-600">Active Devices</p>
+                <p className="text-2xl font-bold text-gray-900">{systemStats.activeDevices}</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
 
-            <Card className="border-0 shadow-lg">
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Connected Devices</CardTitle>
-                <Users className="h-4 w-4 text-purple-600" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{devices.filter(d => d.status === 'online').length}</div>
-                <p className="text-xs text-gray-500 mt-1">of {devices.length} total</p>
-              </CardContent>
-            </Card>
+        <Card className="border-0 shadow-lg">
+          <CardContent className="p-6">
+            <div className="flex items-center">
+              <Clock className="h-8 w-8 text-orange-600" />
+              <div className="ml-4">
+                <p className="text-sm font-medium text-gray-600">System Uptime</p>
+                <p className="text-2xl font-bold text-gray-900">{systemStats.uptime}</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
 
-            <Card className="border-0 shadow-lg">
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">System Health</CardTitle>
-                <Activity className="h-4 w-4 text-orange-600" />
-              </CardHeader>
-              <CardContent>
-                <Badge className="bg-green-100 text-green-800">Healthy</Badge>
-                <p className="text-xs text-gray-500 mt-2">All systems operational</p>
-              </CardContent>
-            </Card>
-          </div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <Card className="border-0 shadow-lg">
-              <CardHeader>
-                <CardTitle>Quick Actions</CardTitle>
-                <CardDescription>Common administrative tasks</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="grid grid-cols-2 gap-3">
-                  <Button onClick={handlePingAll} variant="outline">
-                    <Wifi className="h-4 w-4 mr-2" />
-                    Ping All
-                  </Button>
-                  <Button onClick={() => backupService.downloadBackup()} variant="outline">
-                    <Download className="h-4 w-4 mr-2" />
-                    Backup Now
-                  </Button>
-                  <Button onClick={handleExportLogs} variant="outline">
-                    <Download className="h-4 w-4 mr-2" />
-                    Export Logs
-                  </Button>
-                  <Button onClick={() => window.location.reload()} variant="outline">
-                    <Activity className="h-4 w-4 mr-2" />
-                    Refresh
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="border-0 shadow-lg">
-              <CardHeader>
-                <CardTitle>Storage Usage</CardTitle>
-                <CardDescription>Local data storage statistics</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-3">
-                  <div className="flex justify-between items-center">
-                    <span className="text-sm">Orders</span>
-                    <Badge variant="outline">{JSON.parse(localStorage.getItem('lokal_orders') || '[]').length}</Badge>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-sm">Menu Items</span>
-                    <Badge variant="outline">{JSON.parse(localStorage.getItem('lokal_menu') || '[]').length}</Badge>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-sm">Tables</span>
-                    <Badge variant="outline">{JSON.parse(localStorage.getItem('lokal_tables') || '[]').length}</Badge>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-sm">Rooms</span>
-                    <Badge variant="outline">{JSON.parse(localStorage.getItem('lokal_rooms') || '[]').length}</Badge>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-        </TabsContent>
-
-        <TabsContent value="devices" className="space-y-6">
-          <Card className="border-0 shadow-lg">
-            <CardHeader>
-              <CardTitle className="flex items-center justify-between">
-                Connected Devices
-                <Button onClick={handlePingAll} size="sm" variant="outline">
-                  Ping All
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* System Actions */}
+        <Card className="border-0 shadow-lg">
+          <CardHeader>
+            <CardTitle className="flex items-center">
+              <MonitorCheck className="h-5 w-5 mr-2 text-blue-600" />
+              System Actions
+            </CardTitle>
+            <CardDescription>Critical system maintenance and testing tools</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid grid-cols-2 gap-3">
+              <Button 
+                onClick={handleTestPrinter}
+                className="bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700"
+              >
+                <Printer className="h-4 w-4 mr-2" />
+                Test Printer
+              </Button>
+              
+              <Button 
+                onClick={handlePingAllDevices}
+                variant="outline"
+                className="border-2"
+              >
+                <RefreshCw className="h-4 w-4 mr-2" />
+                Ping All Devices
+              </Button>
+              
+              <Button 
+                onClick={handleBackupNow}
+                className="bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700"
+              >
+                <Download className="h-4 w-4 mr-2" />
+                Backup Now
+              </Button>
+              
+              <div>
+                <input
+                  type="file"
+                  accept=".json"
+                  onChange={handleRestoreFile}
+                  style={{ display: 'none' }}
+                  id="restore-file"
+                />
+                <Button 
+                  variant="outline"
+                  className="w-full border-2"
+                  onClick={() => document.getElementById('restore-file')?.click()}
+                >
+                  <Upload className="h-4 w-4 mr-2" />
+                  Restore Backup
                 </Button>
-              </CardTitle>
-              <CardDescription>Monitor all devices connected to the LAN</CardDescription>
-            </CardHeader>
-            <CardContent>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Connected Devices */}
+        <Card className="border-0 shadow-lg">
+          <CardHeader>
+            <CardTitle className="flex items-center">
+              <Wifi className="h-5 w-5 mr-2 text-purple-600" />
+              Connected Devices
+            </CardTitle>
+            <CardDescription>Real-time LAN device monitoring</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <ScrollArea className="h-64">
               <div className="space-y-3">
-                {devices.map((device) => (
-                  <div key={device.id} className="flex items-center justify-between p-4 border rounded-lg">
-                    <div className="flex items-center space-x-4">
-                      <div className={`w-3 h-3 rounded-full ${device.status === 'online' ? 'bg-green-500' : 'bg-red-500'}`}></div>
+                {connectedDevices.length > 0 ? (
+                  connectedDevices.map((device) => (
+                    <div key={device.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
                       <div>
-                        <div className="font-medium">{device.name}</div>
-                        <div className="text-sm text-gray-600 dark:text-gray-400">{device.ip} • {device.role}</div>
+                        <p className="font-medium text-gray-900">{device.name}</p>
+                        <p className="text-sm text-gray-500">{device.ip} • {device.role}</p>
+                      </div>
+                      <div className="text-right">
+                        <Badge className={getDeviceStatusColor(device.status)}>
+                          {device.status}
+                        </Badge>
+                        {device.ping && (
+                          <p className="text-xs text-gray-500 mt-1">{device.ping}ms</p>
+                        )}
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="text-center py-8">
+                    <Wifi className="h-12 w-12 text-gray-400 mx-auto mb-2" />
+                    <p className="text-gray-500">No devices connected</p>
+                  </div>
+                )}
+              </div>
+            </ScrollArea>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Sync Logs */}
+      <Card className="border-0 shadow-lg">
+        <CardHeader>
+          <CardTitle className="flex items-center">
+            <Server className="h-5 w-5 mr-2 text-green-600" />
+            Sync Logs
+          </CardTitle>
+          <CardDescription>Recent synchronization activity and errors</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <ScrollArea className="h-80">
+            <div className="space-y-2">
+              {syncLogs.length > 0 ? (
+                syncLogs.map((log) => (
+                  <div key={log.id} className="flex items-center justify-between p-3 border rounded-lg">
+                    <div className="flex items-center space-x-3">
+                      {log.type === 'error' ? (
+                        <AlertTriangle className="h-4 w-4 text-red-600" />
+                      ) : (
+                        <CheckCircle className="h-4 w-4 text-green-600" />
+                      )}
+                      <div>
+                        <p className="text-sm font-medium">{log.message}</p>
+                        <p className="text-xs text-gray-500">Device: {log.deviceId}</p>
                       </div>
                     </div>
                     <div className="text-right">
-                      {getStatusBadge(device.status)}
-                      <div className="text-xs text-gray-500 mt-1">{device.lastSeen}</div>
-                      {device.ping && <div className="text-xs text-gray-500">Ping: {device.ping}ms</div>}
+                      <Badge className={getLogTypeColor(log.type)}>
+                        {log.type}
+                      </Badge>
+                      <p className="text-xs text-gray-500 mt-1">
+                        {new Date(log.timestamp).toLocaleTimeString()}
+                      </p>
                     </div>
                   </div>
-                ))}
-                
-                {devices.length === 0 && (
-                  <div className="text-center py-8 text-gray-500">
-                    No devices connected. Check your WebSocket server configuration.
-                  </div>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
+                ))
+              ) : (
+                <div className="text-center py-8">
+                  <Server className="h-12 w-12 text-gray-400 mx-auto mb-2" />
+                  <p className="text-gray-500">No sync activity yet</p>
+                </div>
+              )}
+            </div>
+          </ScrollArea>
+        </CardContent>
+      </Card>
 
-        <TabsContent value="logs" className="space-y-6">
-          <Card className="border-0 shadow-lg">
-            <CardHeader>
-              <CardTitle className="flex items-center justify-between">
-                Sync Logs
-                <Button onClick={handleExportLogs} size="sm" variant="outline">
-                  <Download className="h-4 w-4 mr-2" />
-                  Export
+      {/* Restore Confirmation Dialog */}
+      <Dialog open={showRestoreDialog} onOpenChange={setShowRestoreDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Confirm System Restore</DialogTitle>
+            <DialogDescription>
+              This will replace all current data with the backup. This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          
+          {pendingRestore && (
+            <div className="space-y-4">
+              <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+                <h4 className="font-medium text-yellow-800 mb-2">Backup Information</h4>
+                <div className="text-sm text-yellow-700 space-y-1">
+                  <p>Restaurant: {pendingRestore.metadata.restaurantName}</p>
+                  <p>Backup Date: {new Date(pendingRestore.timestamp).toLocaleString()}</p>
+                  <p>Orders: {pendingRestore.orders.length}</p>
+                  <p>Menu Items: {pendingRestore.menu.length}</p>
+                </div>
+              </div>
+              
+              <div className="flex justify-end space-x-2">
+                <Button variant="outline" onClick={handleCancelRestore}>
+                  Cancel
                 </Button>
-              </CardTitle>
-              <CardDescription>Real-time sync activity and errors</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-2 max-h-96 overflow-y-auto">
-                {syncLogs.map((log, index) => (
-                  <div key={index} className="flex items-center justify-between p-2 text-sm border-b">
-                    <div className="flex items-center space-x-2">
-                      {log.type === 'error' ? 
-                        <AlertTriangle className="h-4 w-4 text-red-500" /> : 
-                        <CheckCircle className="h-4 w-4 text-green-500" />
-                      }
-                      <span>{log.message}</span>
-                    </div>
-                    <span className="text-gray-500">{new Date(log.timestamp).toLocaleTimeString()}</span>
-                  </div>
-                ))}
-                
-                {syncLogs.length === 0 && (
-                  <div className="text-center py-8 text-gray-500">
-                    No sync logs available. Logs will appear here as sync events occur.
-                  </div>
-                )}
+                <Button 
+                  onClick={handleConfirmRestore}
+                  className="bg-red-600 hover:bg-red-700"
+                >
+                  Confirm Restore
+                </Button>
               </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="maintenance" className="space-y-6">
-          <Card className="border-0 shadow-lg">
-            <CardHeader>
-              <CardTitle className="text-red-600">Danger Zone</CardTitle>
-              <CardDescription>Irreversible actions that affect system data</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                <div className="flex items-center justify-between p-4 border border-red-200 rounded-lg">
-                  <div>
-                    <h4 className="font-medium text-red-900">Clear All Orders</h4>
-                    <p className="text-sm text-red-600">Remove all order history and data</p>
-                  </div>
-                  <Button onClick={() => handleClearData('orders')} variant="destructive" size="sm">
-                    Clear Orders
-                  </Button>
-                </div>
-                
-                <div className="flex items-center justify-between p-4 border border-red-200 rounded-lg">
-                  <div>
-                    <h4 className="font-medium text-red-900">Clear Menu Data</h4>
-                    <p className="text-sm text-red-600">Remove all menu items and categories</p>
-                  </div>
-                  <Button onClick={() => handleClearData('menu')} variant="destructive" size="sm">
-                    Clear Menu
-                  </Button>
-                </div>
-                
-                <div className="flex items-center justify-between p-4 border border-red-200 rounded-lg">
-                  <div>
-                    <h4 className="font-medium text-red-900">Reset All Settings</h4>
-                    <p className="text-sm text-red-600">Restore default configuration</p>
-                  </div>
-                  <Button onClick={() => handleClearData('settings')} variant="destructive" size="sm">
-                    Reset Settings
-                  </Button>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

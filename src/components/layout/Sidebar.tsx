@@ -11,9 +11,12 @@ import {
   FileText, 
   Settings,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  Shield
 } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { databaseService } from "@/services/databaseService";
 
 interface SidebarProps {
   isOpen: boolean;
@@ -23,21 +26,30 @@ interface SidebarProps {
 
 export function Sidebar({ isOpen, onToggle, userRole }: SidebarProps) {
   const location = useLocation();
+  const [settings, setSettings] = useState(databaseService.getData().settings);
+
+  useEffect(() => {
+    const unsubscribe = databaseService.subscribe((data) => {
+      setSettings(data.settings);
+    });
+    return unsubscribe;
+  }, []);
 
   const menuItems = [
     { icon: House, label: "Dashboard", path: "/", roles: ["admin", "waiter", "cashier"] },
     { icon: Plus, label: "Orders", path: "/orders", roles: ["admin", "waiter"] },
-    { icon: Printer, label: "Kitchen", path: "/kitchen", roles: ["admin", "chef"] },
+    { icon: Printer, label: "Kitchen", path: "/kitchen", roles: ["admin", "chef"], enabled: settings.modules.kds },
     { icon: FileText, label: "Billing", path: "/billing", roles: ["admin", "cashier"] },
     { icon: Table, label: "Tables", path: "/tables", roles: ["admin", "waiter"] },
     { icon: Menu, label: "Menu", path: "/menu", roles: ["admin"] },
-    { icon: Bed, label: "Rooms", path: "/rooms", roles: ["admin", "waiter", "housekeeping"] },
-    { icon: FileText, label: "Reports", path: "/reports", roles: ["admin", "cashier"] },
+    { icon: Bed, label: "Rooms", path: "/rooms", roles: ["admin", "waiter", "housekeeping"], enabled: settings.modules.roomManagement },
+    { icon: FileText, label: "Reports", path: "/reports", roles: ["admin", "cashier"], enabled: settings.modules.reports },
+    { icon: Shield, label: "Admin Tools", path: "/admin", roles: ["admin"] },
     { icon: Settings, label: "Settings", path: "/settings", roles: ["admin"] },
   ];
 
   const filteredItems = menuItems.filter(item => 
-    item.roles.includes(userRole.toLowerCase())
+    item.roles.includes(userRole.toLowerCase()) && (item.enabled !== false)
   );
 
   return (
@@ -50,10 +62,17 @@ export function Sidebar({ isOpen, onToggle, userRole }: SidebarProps) {
           <div className="flex items-center justify-between">
             {isOpen && (
               <div className="flex items-center space-x-2">
-                <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-purple-600 rounded-lg flex items-center justify-center">
-                  <span className="text-white font-bold text-sm">LR</span>
+                <div 
+                  className="w-8 h-8 rounded-lg flex items-center justify-center"
+                  style={{ background: `linear-gradient(135deg, ${settings.primaryColor}, ${settings.primaryColor}CC)` }}
+                >
+                  {settings.logo ? (
+                    <img src={settings.logo} alt="Logo" className="w-6 h-6 object-contain" />
+                  ) : (
+                    <span className="text-white font-bold text-sm">LR</span>
+                  )}
                 </div>
-                <h1 className="text-xl font-bold text-gray-900">LokalRestro</h1>
+                <h1 className="text-xl font-bold text-gray-900">{settings.restaurantName}</h1>
               </div>
             )}
             <Button
@@ -77,10 +96,11 @@ export function Sidebar({ isOpen, onToggle, userRole }: SidebarProps) {
                   className={cn(
                     "w-full justify-start transition-all duration-200",
                     isActive 
-                      ? "bg-blue-600 text-white hover:bg-blue-700 shadow-md" 
+                      ? "text-white hover:opacity-90 shadow-md" 
                       : "text-gray-700 hover:bg-gray-100",
                     !isOpen && "px-2"
                   )}
+                  style={isActive ? { backgroundColor: settings.primaryColor } : {}}
                 >
                   <item.icon className={cn("h-5 w-5", isOpen && "mr-3")} />
                   {isOpen && <span>{item.label}</span>}
