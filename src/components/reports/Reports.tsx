@@ -1,19 +1,17 @@
-
 import { useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
+import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
 import { 
   BarChart, 
   Bar, 
   XAxis, 
   YAxis, 
   CartesianGrid, 
-  Tooltip, 
   ResponsiveContainer,
   PieChart,
   Pie,
@@ -31,6 +29,12 @@ import {
   FileText
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+
+const chartConfig = {
+  sales: { label: "Sales", color: "hsl(var(--chart-1))" },
+  orders: { label: "Orders", color: "hsl(var(--chart-2))" },
+  revenue: { label: "Revenue", color: "hsl(var(--chart-3))" }
+};
 
 export function Reports() {
   const { toast } = useToast();
@@ -73,27 +77,117 @@ export function Reports() {
     { name: "Sarah Wilson", orders: 35, revenue: 48300, rating: 4.5 }
   ];
 
-  const handleExportReport = (format: string) => {
+  const handleExportReport = async (format: string) => {
     toast({
       title: "Exporting Report",
       description: `Generating ${format.toUpperCase()} report...`,
     });
-    
-    // Simulate export
-    setTimeout(() => {
+
+    try {
+      const reportData = {
+        dateRange,
+        summary: {
+          totalRevenue: 134000,
+          totalOrders: 473,
+          averageOrder: 283,
+          totalCustomers: 1247
+        },
+        salesData,
+        categoryData,
+        topItems,
+        waiterPerformance,
+        exportDate: new Date().toISOString()
+      };
+
+      if (format === 'json') {
+        const blob = new Blob([JSON.stringify(reportData, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `report-${Date.now()}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+      } else if (format === 'csv') {
+        // Convert data to CSV format
+        const csvData = [
+          ['Date Range', `${dateRange.from} to ${dateRange.to}`],
+          ['Total Revenue', '₹134,000'],
+          ['Total Orders', '473'],
+          ['Average Order', '₹283'],
+          ['', ''],
+          ['Top Items', '', ''],
+          ['Item Name', 'Quantity Sold', 'Revenue'],
+          ...topItems.map(item => [item.name, item.sold.toString(), `₹${item.revenue}`])
+        ];
+        
+        const csvContent = csvData.map(row => row.join(',')).join('\n');
+        const blob = new Blob([csvContent], { type: 'text/csv' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `report-${Date.now()}.csv`;
+        a.click();
+        URL.revokeObjectURL(url);
+      } else if (format === 'pdf') {
+        // For PDF, we would typically use a library like jsPDF
+        // For now, we'll create a simple text-based "PDF"
+        const pdfContent = `
+LOKALRESTRO BUSINESS REPORT
+==========================
+
+Date Range: ${dateRange.from} to ${dateRange.to}
+Generated: ${new Date().toLocaleString()}
+
+SUMMARY
+-------
+Total Revenue: ₹1,34,000
+Total Orders: 473
+Average Order: ₹283
+Total Customers: 1,247
+
+TOP PERFORMING ITEMS
+-------------------
+${topItems.map((item, index) => 
+  `${index + 1}. ${item.name} - ${item.sold} units - ₹${item.revenue.toLocaleString()}`
+).join('\n')}
+
+STAFF PERFORMANCE
+----------------
+${waiterPerformance.map(waiter => 
+  `${waiter.name} - ${waiter.orders} orders - ₹${waiter.revenue.toLocaleString()} - ${waiter.rating}⭐`
+).join('\n')}
+        `;
+        
+        const blob = new Blob([pdfContent], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `report-${Date.now()}.txt`;
+        a.click();
+        URL.revokeObjectURL(url);
+      }
+
+      setTimeout(() => {
+        toast({
+          title: "Export Complete",
+          description: `Report downloaded in ${format.toUpperCase()} format`,
+        });
+      }, 1500);
+    } catch (error) {
       toast({
-        title: "Export Complete",
-        description: `Report downloaded in ${format.toUpperCase()} format`,
+        title: "Export Failed",
+        description: "Failed to export report: " + (error as Error).message,
+        variant: "destructive"
       });
-    }, 2000);
+    }
   };
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Reports & Analytics</h1>
-          <p className="text-gray-500 mt-1">Business insights and performance metrics</p>
+          <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">Reports & Analytics</h1>
+          <p className="text-gray-500 dark:text-gray-400 mt-1">Business insights and performance metrics</p>
         </div>
         
         <div className="flex space-x-2">
@@ -104,6 +198,10 @@ export function Reports() {
           <Button variant="outline" onClick={() => handleExportReport("csv")}>
             <Download className="h-4 w-4 mr-2" />
             Export CSV
+          </Button>
+          <Button variant="outline" onClick={() => handleExportReport("json")}>
+            <Download className="h-4 w-4 mr-2" />
+            Export JSON
           </Button>
         </div>
       </div>
@@ -145,54 +243,54 @@ export function Reports() {
 
       {/* Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        <Card className="border-0 shadow-lg bg-gradient-to-br from-green-50 to-emerald-100">
+        <Card className="border-0 shadow-lg bg-gradient-to-br from-green-50 to-emerald-100 dark:from-green-900/20 dark:to-emerald-900/20">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium text-green-700">Total Revenue</CardTitle>
-            <DollarSign className="h-4 w-4 text-green-600" />
+            <CardTitle className="text-sm font-medium text-green-700 dark:text-green-300">Total Revenue</CardTitle>
+            <DollarSign className="h-4 w-4 text-green-600 dark:text-green-400" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-green-900">₹1,34,000</div>
-            <p className="text-xs text-green-600 flex items-center mt-1">
+            <div className="text-2xl font-bold text-green-900 dark:text-green-100">₹1,34,000</div>
+            <p className="text-xs text-green-600 dark:text-green-400 flex items-center mt-1">
               <TrendingUp className="h-3 w-3 mr-1" />
               +12% from last week
             </p>
           </CardContent>
         </Card>
 
-        <Card className="border-0 shadow-lg bg-gradient-to-br from-blue-50 to-cyan-100">
+        <Card className="border-0 shadow-lg bg-gradient-to-br from-blue-50 to-cyan-100 dark:from-blue-900/20 dark:to-cyan-900/20">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium text-blue-700">Total Orders</CardTitle>
-            <ShoppingCart className="h-4 w-4 text-blue-600" />
+            <CardTitle className="text-sm font-medium text-blue-700 dark:text-blue-300">Total Orders</CardTitle>
+            <ShoppingCart className="h-4 w-4 text-blue-600 dark:text-blue-400" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-blue-900">473</div>
-            <p className="text-xs text-blue-600">
+            <div className="text-2xl font-bold text-blue-900 dark:text-blue-100">473</div>
+            <p className="text-xs text-blue-600 dark:text-blue-400">
               Average: 67 orders/day
             </p>
           </CardContent>
         </Card>
 
-        <Card className="border-0 shadow-lg bg-gradient-to-br from-purple-50 to-violet-100">
+        <Card className="border-0 shadow-lg bg-gradient-to-br from-purple-50 to-violet-100 dark:from-purple-900/20 dark:to-violet-900/20">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium text-purple-700">Average Order</CardTitle>
-            <FileText className="h-4 w-4 text-purple-600" />
+            <CardTitle className="text-sm font-medium text-purple-700 dark:text-purple-300">Average Order</CardTitle>
+            <FileText className="h-4 w-4 text-purple-600 dark:text-purple-400" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-purple-900">₹283</div>
-            <p className="text-xs text-purple-600">
+            <div className="text-2xl font-bold text-purple-900 dark:text-purple-100">₹283</div>
+            <p className="text-xs text-purple-600 dark:text-purple-400">
               +₹15 from last week
             </p>
           </CardContent>
         </Card>
 
-        <Card className="border-0 shadow-lg bg-gradient-to-br from-orange-50 to-amber-100">
+        <Card className="border-0 shadow-lg bg-gradient-to-br from-orange-50 to-amber-100 dark:from-orange-900/20 dark:to-amber-900/20">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium text-orange-700">Total Customers</CardTitle>
-            <Users className="h-4 w-4 text-orange-600" />
+            <CardTitle className="text-sm font-medium text-orange-700 dark:text-orange-300">Total Customers</CardTitle>
+            <Users className="h-4 w-4 text-orange-600 dark:text-orange-400" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-orange-900">1,247</div>
-            <p className="text-xs text-orange-600">
+            <div className="text-2xl font-bold text-orange-900 dark:text-orange-100">1,247</div>
+            <p className="text-xs text-orange-600 dark:text-orange-400">
               238 unique customers
             </p>
           </CardContent>
@@ -215,18 +313,17 @@ export function Reports() {
                 <CardDescription>Revenue and order count for the last 7 days</CardDescription>
               </CardHeader>
               <CardContent>
-                <ResponsiveContainer width="100%" height={300}>
-                  <BarChart data={salesData}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="name" />
-                    <YAxis />
-                    <Tooltip formatter={(value, name) => [
-                      name === 'sales' ? `₹${value}` : value,
-                      name === 'sales' ? 'Revenue' : 'Orders'
-                    ]} />
-                    <Bar dataKey="sales" fill="#8884d8" />
-                  </BarChart>
-                </ResponsiveContainer>
+                <ChartContainer config={chartConfig} className="h-[300px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={salesData}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="name" />
+                      <YAxis />
+                      <ChartTooltip content={<ChartTooltipContent />} />
+                      <Bar dataKey="sales" fill="var(--color-sales)" />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </ChartContainer>
               </CardContent>
             </Card>
 
@@ -236,25 +333,27 @@ export function Reports() {
                 <CardDescription>Revenue distribution across menu categories</CardDescription>
               </CardHeader>
               <CardContent>
-                <ResponsiveContainer width="100%" height={300}>
-                  <PieChart>
-                    <Pie
-                      data={categoryData}
-                      cx="50%"
-                      cy="50%"
-                      labelLine={false}
-                      label={({ name, percent }) => `${name} (${(percent * 100).toFixed(0)}%)`}
-                      outerRadius={80}
-                      fill="#8884d8"
-                      dataKey="value"
-                    >
-                      {categoryData.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={entry.color} />
-                      ))}
-                    </Pie>
-                    <Tooltip />
-                  </PieChart>
-                </ResponsiveContainer>
+                <ChartContainer config={chartConfig} className="h-[300px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={categoryData}
+                        cx="50%"
+                        cy="50%"
+                        labelLine={false}
+                        label={({ name, percent }) => `${name} (${(percent * 100).toFixed(0)}%)`}
+                        outerRadius={80}
+                        fill="#8884d8"
+                        dataKey="value"
+                      >
+                        {categoryData.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={entry.color} />
+                        ))}
+                      </Pie>
+                      <ChartTooltip content={<ChartTooltipContent />} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </ChartContainer>
               </CardContent>
             </Card>
           </div>
@@ -276,11 +375,11 @@ export function Reports() {
                       </Badge>
                       <div>
                         <h4 className="font-medium">{item.name}</h4>
-                        <p className="text-sm text-gray-600">{item.sold} units sold</p>
+                        <p className="text-sm text-gray-600 dark:text-gray-400">{item.sold} units sold</p>
                       </div>
                     </div>
                     <div className="text-right">
-                      <div className="font-semibold text-green-600">₹{item.revenue.toLocaleString()}</div>
+                      <div className="font-semibold text-green-600 dark:text-green-400">₹{item.revenue.toLocaleString()}</div>
                       <div className="text-sm text-gray-500">Revenue</div>
                     </div>
                   </div>
@@ -306,14 +405,14 @@ export function Reports() {
                       </div>
                       <div>
                         <h4 className="font-medium">{waiter.name}</h4>
-                        <p className="text-sm text-gray-600">{waiter.orders} orders served</p>
+                        <p className="text-sm text-gray-600 dark:text-gray-400">{waiter.orders} orders served</p>
                       </div>
                     </div>
                     <div className="text-right">
-                      <div className="font-semibold text-green-600">₹{waiter.revenue.toLocaleString()}</div>
+                      <div className="font-semibold text-green-600 dark:text-green-400">₹{waiter.revenue.toLocaleString()}</div>
                       <div className="flex items-center space-x-2">
                         <span className="text-sm text-gray-500">Rating:</span>
-                        <Badge className="bg-yellow-100 text-yellow-800">
+                        <Badge className="bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200">
                           ⭐ {waiter.rating}
                         </Badge>
                       </div>
@@ -338,15 +437,15 @@ export function Reports() {
                   <div className="space-y-2">
                     <div className="flex justify-between items-center">
                       <span className="text-sm">12:00 PM - 2:00 PM</span>
-                      <Badge className="bg-red-100 text-red-800">Peak</Badge>
+                      <Badge className="bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200">Peak</Badge>
                     </div>
                     <div className="flex justify-between items-center">
                       <span className="text-sm">7:00 PM - 9:00 PM</span>
-                      <Badge className="bg-red-100 text-red-800">Peak</Badge>
+                      <Badge className="bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200">Peak</Badge>
                     </div>
                     <div className="flex justify-between items-center">
                       <span className="text-sm">9:00 AM - 11:00 AM</span>
-                      <Badge className="bg-yellow-100 text-yellow-800">Moderate</Badge>
+                      <Badge className="bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200">Moderate</Badge>
                     </div>
                   </div>
                 </div>

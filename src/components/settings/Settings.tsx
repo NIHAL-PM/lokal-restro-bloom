@@ -1,5 +1,4 @@
-
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,6 +9,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { 
   Settings as SettingsIcon, 
   Printer, 
@@ -19,19 +19,34 @@ import {
   Volume2,
   Users,
   Palette,
-  DollarSign
+  DollarSign,
+  Image,
+  Moon,
+  Sun
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { printerService } from "@/services/printerService";
+import { backupService } from "@/services/backupService";
+import { syncService } from "@/services/syncService";
+import { soundService } from "@/services/soundService";
 
 export function Settings() {
   const { toast } = useToast();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const logoInputRef = useRef<HTMLInputElement>(null);
   
   const [settings, setSettings] = useState({
+    // Branding Settings
+    restaurantName: localStorage.getItem('lokal_restaurant_name') || "LokalRestro",
+    logoUrl: localStorage.getItem('lokal_logo_url') || "",
+    primaryColor: localStorage.getItem('lokal_primary_color') || "blue",
+    footerText: localStorage.getItem('lokal_footer_text') || "Thank you for your visit!",
+    
     // General Settings
-    restaurantName: "LokalRestro",
     currency: "INR",
     timezone: "Asia/Kolkata",
     language: "en",
+    theme: localStorage.getItem('lokal_theme') || "light",
     
     // Tax & Billing
     taxRate: "18",
@@ -41,95 +56,164 @@ export function Settings() {
     // Printer Settings
     printerIP: "192.168.1.100",
     printerPort: "9100",
+    printerEnabled: true,
     
     // Sound Settings
     enableSounds: true,
     soundVolume: "50",
     
-    // Theme Settings
-    theme: "light",
-    primaryColor: "blue",
-    
     // Module Settings
     enableKDS: true,
     enableRoomManagement: true,
     enableReports: true,
+    
+    // Network Settings
+    serverUrl: "ws://192.168.1.1:8080"
   });
 
-  const [connectedDevices] = useState([
-    { id: 1, name: "POS Station 1", ip: "192.168.1.101", role: "cashier", status: "online", lastSeen: "Just now" },
-    { id: 2, name: "Kitchen Display", ip: "192.168.1.102", role: "chef", status: "online", lastSeen: "1 min ago" },
-    { id: 3, name: "Waiter Tablet 1", ip: "192.168.1.103", role: "waiter", status: "offline", lastSeen: "5 min ago" },
-  ]);
+  const [connectedDevices] = useState(syncService.getConnectedDevices());
+  const [restoreDialogOpen, setRestoreDialogOpen] = useState(false);
+  const [pendingRestore, setPendingRestore] = useState(backupService.getPendingRestore());
 
   const handleSaveSettings = () => {
-    // Save settings to localStorage or sync across LAN
-    localStorage.setItem('lokal_settings', JSON.stringify(settings));
+    // Save all settings to localStorage
+    Object.entries(settings).forEach(([key, value]) => {
+      localStorage.setItem(`lokal_${key}`, value.toString());
+    });
+    
+    // Update services
+    printerService.updateConfig({
+      ip: settings.printerIP,
+      port: settings.printerPort,
+      enabled: settings.printerEnabled
+    });
+    
+    soundService.setEnabled(settings.enableSounds);
+    soundService.setVolume(parseFloat(settings.soundVolume));
+    
     toast({
       title: "Settings Saved",
       description: "Your configuration has been updated successfully",
     });
   };
 
-  const handleTestPrinter = () => {
+  const handleTestPrinter = async () => {
     toast({
       title: "Testing Printer",
       description: "Sending test receipt to printer...",
     });
     
-    // Simulate printer test
+    const success = await printerService.testPrinter();
+    
     setTimeout(() => {
       toast({
-        title: "Printer Test Complete",
-        description: "Test receipt printed successfully",
+        title: success ? "Printer Test Complete" : "Printer Test Failed",
+        description: success ? "Test receipt printed successfully" : "Check printer connection and settings",
+        variant: success ? "default" : "destructive"
       });
     }, 2000);
   };
 
-  const handleBackup = () => {
-    const backupData = {
-      settings,
-      timestamp: new Date().toISOString(),
-      version: "1.0.0"
+  const handleBackup = async () => {
+    try {
+      await backupService.downloadBackup();
+      toast({
+        title: "Backup Created",
+        description: "Configuration backup downloaded successfully",
+      });
+    } catch (error) {
+      toast({
+        title: "Backup Failed",
+        description: "Failed to create backup: " + (error as Error).message,
+        variant: "destructive"
+      });
+    }
+  };
+
+  const handleFileRestore = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    try {
+      await backupService.restoreBackup(file);
+      setPendingRestore(backupService.getPendingRestore());
+      setRestoreDialogOpen(true);
+    } catch (error) {
+      toast({
+        title: "Invalid Backup File",
+        description: (error as Error).message,
+        variant: "destructive"
+      });
+    }
+  };
+
+  const confirmRestore = async () => {
+    try {
+      await backupService.confirmRestore();
+      toast({
+        title: "Restore Complete",
+        description: "System has been restored from backup. Please refresh the page.",
+      });
+      setRestoreDialogOpen(false);
+      setPendingRestore(null);
+      setTimeout(() => window.location.reload(), 2000);
+    } catch (error) {
+      toast({
+        title: "Restore Failed",
+        description: (error as Error).message,
+        variant: "destructive"
+      });
+    }
+  };
+
+  const handleLogoUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const logoUrl = e.target?.result as string;
+      setSettings(prev => ({ ...prev, logoUrl }));
+      localStorage.setItem('lokal_logo_url', logoUrl);
+      toast({
+        title: "Logo Updated",
+        description: "Your logo has been uploaded successfully",
+      });
     };
-    
-    const blob = new Blob([JSON.stringify(backupData, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `lokalrestro-backup-${new Date().toISOString().split('T')[0]}.json`;
-    a.click();
-    
-    toast({
-      title: "Backup Created",
-      description: "Configuration backup downloaded successfully",
-    });
+    reader.readAsDataURL(file);
   };
 
   const pingAllDevices = () => {
+    syncService.pingAllDevices();
     toast({
       title: "Pinging Devices",
       description: "Checking connectivity to all devices...",
     });
-    
-    // Simulate ping test
-    setTimeout(() => {
-      toast({
-        title: "Ping Complete",
-        description: "2 of 3 devices are responding",
-      });
-    }, 1500);
+  };
+
+  const toggleTheme = () => {
+    const newTheme = settings.theme === 'light' ? 'dark' : 'light';
+    setSettings(prev => ({ ...prev, theme: newTheme }));
+    localStorage.setItem('lokal_theme', newTheme);
+    document.documentElement.classList.toggle('dark', newTheme === 'dark');
   };
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold text-gray-900">Settings</h1>
-        <p className="text-gray-500 mt-1">Configure your LokalRestro system</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">Settings</h1>
+          <p className="text-gray-500 dark:text-gray-400 mt-1">Configure your LokalRestro system</p>
+        </div>
+        <Button onClick={toggleTheme} variant="outline" className="flex items-center space-x-2">
+          {settings.theme === 'light' ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
+          <span>{settings.theme === 'light' ? 'Dark Mode' : 'Light Mode'}</span>
+        </Button>
       </div>
 
-      <Tabs defaultValue="general" className="w-full">
-        <TabsList className="grid w-full grid-cols-6">
+      <Tabs defaultValue="branding" className="w-full">
+        <TabsList className="grid w-full grid-cols-7">
+          <TabsTrigger value="branding">Branding</TabsTrigger>
           <TabsTrigger value="general">General</TabsTrigger>
           <TabsTrigger value="billing">Billing</TabsTrigger>
           <TabsTrigger value="printer">Printer</TabsTrigger>
@@ -137,6 +221,102 @@ export function Settings() {
           <TabsTrigger value="network">Network</TabsTrigger>
           <TabsTrigger value="backup">Backup</TabsTrigger>
         </TabsList>
+
+        <TabsContent value="branding" className="space-y-6">
+          <Card className="border-0 shadow-lg">
+            <CardHeader>
+              <CardTitle className="flex items-center">
+                <Palette className="h-5 w-5 mr-2" />
+                Branding & Appearance
+              </CardTitle>
+              <CardDescription>Customize your restaurant's brand identity</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="space-y-4">
+                  <div>
+                    <Label htmlFor="restaurantName">Restaurant Name</Label>
+                    <Input
+                      id="restaurantName"
+                      value={settings.restaurantName}
+                      onChange={(e) => setSettings(prev => ({ ...prev, restaurantName: e.target.value }))}
+                      className="text-lg font-semibold"
+                    />
+                  </div>
+                  
+                  <div>
+                    <Label htmlFor="footerText">Invoice Footer Text</Label>
+                    <Textarea
+                      id="footerText"
+                      value={settings.footerText}
+                      onChange={(e) => setSettings(prev => ({ ...prev, footerText: e.target.value }))}
+                      placeholder="Thank you message for receipts..."
+                      rows={3}
+                    />
+                  </div>
+                  
+                  <div>
+                    <Label htmlFor="primaryColor">Primary Color Theme</Label>
+                    <Select value={settings.primaryColor} onValueChange={(value) => setSettings(prev => ({ ...prev, primaryColor: value }))}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="blue">Blue</SelectItem>
+                        <SelectItem value="green">Green</SelectItem>
+                        <SelectItem value="purple">Purple</SelectItem>
+                        <SelectItem value="red">Red</SelectItem>
+                        <SelectItem value="orange">Orange</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                
+                <div className="space-y-4">
+                  <div>
+                    <Label>Logo Upload</Label>
+                    <div className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg p-6 text-center">
+                      {settings.logoUrl ? (
+                        <div className="space-y-2">
+                          <img src={settings.logoUrl} alt="Logo" className="mx-auto h-16 w-auto" />
+                          <Button variant="outline" onClick={() => logoInputRef.current?.click()}>
+                            Change Logo
+                          </Button>
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          <Image className="mx-auto h-12 w-12 text-gray-400" />
+                          <Button variant="outline" onClick={() => logoInputRef.current?.click()}>
+                            <Upload className="h-4 w-4 mr-2" />
+                            Upload Logo
+                          </Button>
+                        </div>
+                      )}
+                      <input
+                        ref={logoInputRef}
+                        type="file"
+                        accept="image/*"
+                        onChange={handleLogoUpload}
+                        className="hidden"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+              
+              <div className="p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                <h4 className="font-medium mb-2">Preview</h4>
+                <div className="bg-white dark:bg-gray-700 p-4 rounded border">
+                  <div className="flex items-center space-x-3 mb-2">
+                    {settings.logoUrl && <img src={settings.logoUrl} alt="Logo" className="h-8 w-auto" />}
+                    <h3 className="font-bold text-lg">{settings.restaurantName}</h3>
+                  </div>
+                  <p className="text-sm text-gray-600 dark:text-gray-300">{settings.footerText}</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
 
         <TabsContent value="general" className="space-y-6">
           <Card className="border-0 shadow-lg">
@@ -149,15 +329,6 @@ export function Settings() {
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <Label htmlFor="restaurantName">Restaurant Name</Label>
-                  <Input
-                    id="restaurantName"
-                    value={settings.restaurantName}
-                    onChange={(e) => setSettings(prev => ({ ...prev, restaurantName: e.target.value }))}
-                  />
-                </div>
-                
                 <div>
                   <Label htmlFor="currency">Currency</Label>
                   <Select value={settings.currency} onValueChange={(value) => setSettings(prev => ({ ...prev, currency: value }))}>
@@ -182,20 +353,6 @@ export function Settings() {
                       <SelectItem value="Asia/Kolkata">Asia/Kolkata</SelectItem>
                       <SelectItem value="UTC">UTC</SelectItem>
                       <SelectItem value="America/New_York">America/New_York</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                
-                <div>
-                  <Label htmlFor="theme">Theme</Label>
-                  <Select value={settings.theme} onValueChange={(value) => setSettings(prev => ({ ...prev, theme: value }))}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="light">Light</SelectItem>
-                      <SelectItem value="dark">Dark</SelectItem>
-                      <SelectItem value="auto">Auto</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -306,26 +463,19 @@ export function Settings() {
                 </div>
               </div>
               
+              <div className="flex items-center space-x-2">
+                <Switch
+                  id="printerEnabled"
+                  checked={settings.printerEnabled}
+                  onCheckedChange={(checked) => setSettings(prev => ({ ...prev, printerEnabled: checked }))}
+                />
+                <Label htmlFor="printerEnabled">Enable Printer</Label>
+              </div>
+              
               <Button onClick={handleTestPrinter} variant="outline" className="w-full">
                 <Printer className="h-4 w-4 mr-2" />
                 Test Printer Connection
               </Button>
-              
-              <div className="p-4 bg-gray-50 rounded-lg">
-                <h4 className="font-medium mb-2">Test Receipt Preview:</h4>
-                <div className="text-sm font-mono bg-white p-3 rounded border">
-                  <div className="text-center">
-                    <div className="font-bold">{settings.restaurantName}</div>
-                    <div>Test Receipt</div>
-                    <div>{new Date().toLocaleString()}</div>
-                  </div>
-                  <div className="border-t border-dashed my-2"></div>
-                  <div>1x Test Item ..................... ₹100.00</div>
-                  <div className="border-t border-dashed my-2"></div>
-                  <div className="font-bold">Total: ₹100.00</div>
-                  <div className="text-center mt-2">Thank you for your visit!</div>
-                </div>
-              </div>
             </CardContent>
           </Card>
         </TabsContent>
@@ -344,7 +494,7 @@ export function Settings() {
                 <div className="flex items-center justify-between p-4 border rounded-lg">
                   <div>
                     <h4 className="font-medium">Kitchen Display System</h4>
-                    <p className="text-sm text-gray-600">Real-time order tracking for kitchen staff</p>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">Real-time order tracking for kitchen staff</p>
                   </div>
                   <Switch
                     checked={settings.enableKDS}
@@ -355,7 +505,7 @@ export function Settings() {
                 <div className="flex items-center justify-between p-4 border rounded-lg">
                   <div>
                     <h4 className="font-medium">Room Management</h4>
-                    <p className="text-sm text-gray-600">Hotel room booking and management</p>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">Hotel room booking and management</p>
                   </div>
                   <Switch
                     checked={settings.enableRoomManagement}
@@ -366,7 +516,7 @@ export function Settings() {
                 <div className="flex items-center justify-between p-4 border rounded-lg">
                   <div>
                     <h4 className="font-medium">Reports & Analytics</h4>
-                    <p className="text-sm text-gray-600">Sales reports and business insights</p>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">Sales reports and business insights</p>
                   </div>
                   <Switch
                     checked={settings.enableReports}
@@ -388,6 +538,16 @@ export function Settings() {
               <CardDescription>Monitor LAN connectivity and device status</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
+              <div>
+                <Label htmlFor="serverUrl">WebSocket Server URL</Label>
+                <Input
+                  id="serverUrl"
+                  value={settings.serverUrl}
+                  onChange={(e) => setSettings(prev => ({ ...prev, serverUrl: e.target.value }))}
+                  placeholder="ws://192.168.1.1:8080"
+                />
+              </div>
+              
               <div className="flex justify-between items-center">
                 <h4 className="font-medium">Connected Devices</h4>
                 <Button onClick={pingAllDevices} variant="outline" size="sm">
@@ -402,7 +562,7 @@ export function Settings() {
                       <div className={`w-3 h-3 rounded-full ${device.status === 'online' ? 'bg-green-500' : 'bg-red-500'}`}></div>
                       <div>
                         <div className="font-medium">{device.name}</div>
-                        <div className="text-sm text-gray-600">{device.ip} • {device.role}</div>
+                        <div className="text-sm text-gray-600 dark:text-gray-400">{device.ip} • {device.role}</div>
                       </div>
                     </div>
                     <div className="text-right">
@@ -413,19 +573,6 @@ export function Settings() {
                     </div>
                   </div>
                 ))}
-              </div>
-              
-              <Separator />
-              
-              <div className="grid grid-cols-2 gap-4 text-center">
-                <div className="p-4 bg-green-50 rounded-lg">
-                  <div className="text-2xl font-bold text-green-600">2</div>
-                  <div className="text-sm text-green-700">Online Devices</div>
-                </div>
-                <div className="p-4 bg-red-50 rounded-lg">
-                  <div className="text-2xl font-bold text-red-600">1</div>
-                  <div className="text-sm text-red-700">Offline Devices</div>
-                </div>
               </div>
             </CardContent>
           </Card>
@@ -448,32 +595,18 @@ export function Settings() {
                   <span className="text-xs opacity-80">Download current configuration</span>
                 </Button>
                 
-                <Button variant="outline" className="h-20 flex flex-col">
+                <Button variant="outline" className="h-20 flex flex-col" onClick={() => fileInputRef.current?.click()}>
                   <Upload className="h-6 w-6 mb-2" />
                   Restore Backup
                   <span className="text-xs opacity-80">Upload and restore from file</span>
                 </Button>
-              </div>
-              
-              <div className="p-4 bg-blue-50 rounded-lg">
-                <h4 className="font-medium text-blue-900 mb-2">Backup Information</h4>
-                <ul className="text-sm text-blue-800 space-y-1">
-                  <li>• Settings and configuration</li>
-                  <li>• Menu items and categories</li>
-                  <li>• Table and room setup</li>
-                  <li>• User roles and permissions</li>
-                  <li>• Recent transaction logs</li>
-                </ul>
-              </div>
-              
-              <div className="p-4 bg-yellow-50 rounded-lg">
-                <h4 className="font-medium text-yellow-900 mb-2">⚠️ Important Notes</h4>
-                <ul className="text-sm text-yellow-800 space-y-1">
-                  <li>• Backups are created in JSON format</li>
-                  <li>• Store backups securely and regularly</li>
-                  <li>• Test restore functionality periodically</li>
-                  <li>• Consider automated backup scheduling</li>
-                </ul>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".json"
+                  onChange={handleFileRestore}
+                  className="hidden"
+                />
               </div>
             </CardContent>
           </Card>
@@ -488,6 +621,32 @@ export function Settings() {
           Save All Settings
         </Button>
       </div>
+
+      <Dialog open={restoreDialogOpen} onOpenChange={setRestoreDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Confirm Restore</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to restore from this backup? This will replace all current data.
+            </DialogDescription>
+          </DialogHeader>
+          {pendingRestore && (
+            <div className="space-y-2">
+              <p><strong>Backup Date:</strong> {new Date(pendingRestore.timestamp).toLocaleString()}</p>
+              <p><strong>Version:</strong> {pendingRestore.version}</p>
+              <p><strong>Restaurant:</strong> {pendingRestore.metadata.restaurantName}</p>
+            </div>
+          )}
+          <div className="flex justify-end space-x-2">
+            <Button variant="outline" onClick={() => setRestoreDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={confirmRestore} variant="destructive">
+              Confirm Restore
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
