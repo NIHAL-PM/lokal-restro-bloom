@@ -43,15 +43,18 @@ export function Settings() {
   };
 
   const updateNestedSetting = (parent: keyof AppSettings, key: string, value: any) => {
-    const newSettings = {
-      ...settings,
-      [parent]: {
-        ...settings[parent as keyof AppSettings],
-        [key]: value
-      }
-    };
-    setSettings(newSettings);
-    setHasChanges(true);
+    const parentValue = settings[parent];
+    if (typeof parentValue === 'object' && parentValue !== null) {
+      const newSettings = {
+        ...settings,
+        [parent]: {
+          ...parentValue,
+          [key]: value
+        }
+      };
+      setSettings(newSettings);
+      setHasChanges(true);
+    }
   };
 
   const handleSave = () => {
