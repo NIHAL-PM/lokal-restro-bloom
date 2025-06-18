@@ -1,4 +1,3 @@
-
 import { useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -11,12 +10,33 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Plus, Search, Clock, CheckCircle, AlertCircle, Edit } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
+interface OrderItem {
+  id?: string;
+  name: string;
+  quantity: number;
+  price: number;
+  notes?: string;
+}
+
+interface Order {
+  id: string;
+  type: string;
+  table?: string;
+  room?: string;
+  waiter: string;
+  items: OrderItem[];
+  total: number;
+  status: string;
+  timestamp: string;
+  notes: string;
+}
+
 export function OrderManagement() {
   const { toast } = useToast();
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedType, setSelectedType] = useState("all");
   
-  const [orders, setOrders] = useState([
+  const [orders, setOrders] = useState<Order[]>([
     {
       id: "ORD-001",
       type: "dine-in",
@@ -50,7 +70,7 @@ export function OrderManagement() {
   const [newOrder, setNewOrder] = useState({
     type: "dine-in",
     location: "",
-    items: [],
+    items: [] as OrderItem[],
     notes: "",
     waiter: "Current User"
   });
@@ -75,9 +95,13 @@ export function OrderManagement() {
       return;
     }
 
-    const order = {
+    const order: Order = {
       id: `ORD-${String(orders.length + 1).padStart(3, '0')}`,
-      ...newOrder,
+      type: newOrder.type,
+      ...(newOrder.type === "room-service" ? { room: newOrder.location } : { table: newOrder.location }),
+      waiter: newOrder.waiter,
+      items: newOrder.items,
+      notes: newOrder.notes,
       total: newOrder.items.reduce((sum, item) => sum + (item.price * item.quantity), 0),
       status: "pending",
       timestamp: new Date().toISOString()
@@ -98,7 +122,7 @@ export function OrderManagement() {
     });
   };
 
-  const addItemToOrder = (menuItem) => {
+  const addItemToOrder = (menuItem: any) => {
     const existingItem = newOrder.items.find(item => item.id === menuItem.id);
     if (existingItem) {
       setNewOrder(prev => ({

@@ -10,7 +10,8 @@ import {
   Table,
   Bed,
   ChefHat,
-  AlertCircle
+  AlertCircle,
+  Plus
 } from "lucide-react";
 import { useEffect, useState } from "react";
 

@@ -5,11 +5,10 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
-import { Plus, Edit, Trash2, Search, DollarSign } from "lucide-react";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Plus, Search, Edit, Trash2, ChefHat } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 export function MenuManagement() {
@@ -21,93 +20,56 @@ export function MenuManagement() {
     {
       id: "1",
       name: "Butter Chicken",
-      description: "Creamy tomato-based curry with tender chicken pieces",
-      price: 350,
       category: "Main Course",
+      price: 350,
+      description: "Creamy tomato-based chicken curry",
       available: true,
       stock: 25,
-      preparationTime: 15,
-      isVeg: false,
-      spiceLevel: "Medium",
-      allergens: ["Dairy", "Nuts"]
+      variants: ["Regular", "Large"],
+      addOns: ["Extra Rice", "Naan"]
     },
     {
       id: "2",
       name: "Paneer Tikka",
-      description: "Grilled cottage cheese with Indian spices",
-      price: 320,
-      category: "Main Course",
+      category: "Starters",
+      price: 280,
+      description: "Grilled cottage cheese with spices",
       available: true,
-      stock: 30,
-      preparationTime: 12,
-      isVeg: true,
-      spiceLevel: "Medium",
-      allergens: ["Dairy"]
+      stock: 15,
+      variants: ["6pcs", "12pcs"],
+      addOns: ["Mint Chutney", "Onion Salad"]
     },
     {
       id: "3",
-      name: "Garlic Naan",
-      description: "Fresh baked bread with garlic and herbs",
-      price: 60,
-      category: "Bread",
-      available: true,
-      stock: 50,
-      preparationTime: 5,
-      isVeg: true,
-      spiceLevel: "Mild",
-      allergens: ["Gluten", "Dairy"]
-    },
-    {
-      id: "4",
-      name: "Biryani Special",
-      description: "Aromatic basmati rice with chicken and spices",
-      price: 450,
-      category: "Rice",
+      name: "Fresh Lime Soda",
+      category: "Beverages",
+      price: 80,
+      description: "Refreshing lime drink",
       available: false,
       stock: 0,
-      preparationTime: 25,
-      isVeg: false,
-      spiceLevel: "Hot",
-      allergens: []
-    },
-    {
-      id: "5",
-      name: "Fresh Lime Soda",
-      description: "Refreshing lime drink with soda water",
-      price: 80,
-      category: "Beverages",
-      available: true,
-      stock: 100,
-      preparationTime: 2,
-      isVeg: true,
-      spiceLevel: "None",
-      allergens: []
+      variants: ["Sweet", "Salt", "Plain"],
+      addOns: []
     }
   ]);
 
   const [showAddDialog, setShowAddDialog] = useState(false);
-  const [editingItem, setEditingItem] = useState(null);
-  
   const [newItem, setNewItem] = useState({
     name: "",
-    description: "",
-    price: "",
     category: "",
-    stock: "",
-    preparationTime: "",
-    isVeg: true,
-    spiceLevel: "Mild",
-    allergens: ""
+    price: "",
+    description: "",
+    stock: "10",
+    variants: "",
+    addOns: ""
   });
 
-  const categories = ["Main Course", "Appetizers", "Bread", "Rice", "Beverages", "Desserts"];
-  const spiceLevels = ["None", "Mild", "Medium", "Hot", "Very Hot"];
+  const categories = ["Starters", "Main Course", "Rice", "Bread", "Beverages", "Desserts"];
 
   const handleAddItem = () => {
-    if (!newItem.name || !newItem.price || !newItem.category) {
+    if (!newItem.name || !newItem.category || !newItem.price) {
       toast({
-        title: "Missing Information",
-        description: "Please fill in all required fields",
+        title: "Incomplete Information",
+        description: "Please fill all required fields",
         variant: "destructive"
       });
       return;
@@ -116,80 +78,36 @@ export function MenuManagement() {
     const item = {
       id: String(menuItems.length + 1),
       name: newItem.name,
-      description: newItem.description,
-      price: parseFloat(newItem.price),
       category: newItem.category,
+      price: parseInt(newItem.price),
+      description: newItem.description,
       available: true,
-      stock: parseInt(newItem.stock) || 0,
-      preparationTime: parseInt(newItem.preparationTime) || 10,
-      isVeg: newItem.isVeg,
-      spiceLevel: newItem.spiceLevel,
-      allergens: newItem.allergens ? newItem.allergens.split(',').map(a => a.trim()) : []
+      stock: parseInt(newItem.stock),
+      variants: newItem.variants ? newItem.variants.split(',').map(v => v.trim()) : [],
+      addOns: newItem.addOns ? newItem.addOns.split(',').map(a => a.trim()) : []
     };
 
-    if (editingItem) {
-      setMenuItems(prev => prev.map(i => i.id === editingItem.id ? { ...item, id: editingItem.id } : i));
-      toast({
-        title: "Item Updated",
-        description: `${item.name} has been updated successfully`,
-      });
-    } else {
-      setMenuItems(prev => [...prev, item]);
-      toast({
-        title: "Item Added",
-        description: `${item.name} has been added to the menu`,
-      });
-    }
-
-    setNewItem({
-      name: "",
-      description: "",
-      price: "",
-      category: "",
-      stock: "",
-      preparationTime: "",
-      isVeg: true,
-      spiceLevel: "Mild",
-      allergens: ""
-    });
-    setEditingItem(null);
+    setMenuItems(prev => [...prev, item]);
+    setNewItem({ name: "", category: "", price: "", description: "", stock: "10", variants: "", addOns: "" });
     setShowAddDialog(false);
-  };
 
-  const handleEditItem = (item) => {
-    setEditingItem(item);
-    setNewItem({
-      name: item.name,
-      description: item.description,
-      price: String(item.price),
-      category: item.category,
-      stock: String(item.stock),
-      preparationTime: String(item.preparationTime),
-      isVeg: item.isVeg,
-      spiceLevel: item.spiceLevel,
-      allergens: item.allergens.join(', ')
+    toast({
+      title: "Item Added",
+      description: `${item.name} has been added to the menu`,
     });
-    setShowAddDialog(true);
   };
 
   const toggleAvailability = (itemId: string) => {
     setMenuItems(prev => prev.map(item => 
       item.id === itemId ? { ...item, available: !item.available } : item
     ));
-    
-    const item = menuItems.find(i => i.id === itemId);
-    toast({
-      title: "Availability Updated",
-      description: `${item?.name} is now ${item?.available ? "unavailable" : "available"}`,
-    });
   };
 
   const deleteItem = (itemId: string) => {
-    const item = menuItems.find(i => i.id === itemId);
     setMenuItems(prev => prev.filter(item => item.id !== itemId));
     toast({
       title: "Item Deleted",
-      description: `${item?.name} has been removed from the menu`,
+      description: "Menu item has been removed",
     });
   };
 
@@ -200,153 +118,99 @@ export function MenuManagement() {
     return matchesSearch && matchesCategory;
   });
 
-  const availableItems = menuItems.filter(item => item.available).length;
-  const totalCategories = [...new Set(menuItems.map(item => item.category))].length;
-  const lowStockItems = menuItems.filter(item => item.stock < 10).length;
-
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold text-gray-900">Menu Management</h1>
-          <p className="text-gray-500 mt-1">Manage your restaurant's menu items and pricing</p>
+          <p className="text-gray-500 mt-1">Manage your restaurant menu items</p>
         </div>
         
-        <Dialog open={showAddDialog} onOpenChange={(open) => {
-          setShowAddDialog(open);
-          if (!open) {
-            setEditingItem(null);
-            setNewItem({
-              name: "",
-              description: "",
-              price: "",
-              category: "",
-              stock: "",
-              preparationTime: "",
-              isVeg: true,
-              spiceLevel: "Mild",
-              allergens: ""
-            });
-          }
-        }}>
+        <Dialog open={showAddDialog} onOpenChange={setShowAddDialog}>
           <DialogTrigger asChild>
-            <Button className="bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700">
+            <Button className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700">
               <Plus className="h-4 w-4 mr-2" />
-              Add Item
+              Add Menu Item
             </Button>
           </DialogTrigger>
-          <DialogContent className="max-w-2xl">
+          <DialogContent>
             <DialogHeader>
-              <DialogTitle>{editingItem ? "Edit Menu Item" : "Add New Menu Item"}</DialogTitle>
-              <DialogDescription>
-                {editingItem ? "Update the details for this menu item" : "Create a new item for your menu"}
-              </DialogDescription>
+              <DialogTitle>Add New Menu Item</DialogTitle>
+              <DialogDescription>Create a new item for your menu</DialogDescription>
             </DialogHeader>
             
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="grid grid-cols-2 gap-4">
               <div className="space-y-4">
                 <div>
-                  <Label htmlFor="itemName">Item Name *</Label>
+                  <Label>Item Name *</Label>
                   <Input
-                    id="itemName"
                     value={newItem.name}
                     onChange={(e) => setNewItem(prev => ({ ...prev, name: e.target.value }))}
                     placeholder="e.g., Butter Chicken"
                   />
                 </div>
-                
+
                 <div>
-                  <Label htmlFor="itemDescription">Description</Label>
-                  <Textarea
-                    id="itemDescription"
-                    value={newItem.description}
-                    onChange={(e) => setNewItem(prev => ({ ...prev, description: e.target.value }))}
-                    placeholder="Brief description of the dish"
-                    rows={3}
-                  />
-                </div>
-                
-                <div>
-                  <Label htmlFor="itemPrice">Price (₹) *</Label>
-                  <Input
-                    id="itemPrice"
-                    type="number"
-                    value={newItem.price}
-                    onChange={(e) => setNewItem(prev => ({ ...prev, price: e.target.value }))}
-                    placeholder="0"
-                    step="0.01"
-                  />
-                </div>
-                
-                <div>
-                  <Label htmlFor="itemCategory">Category *</Label>
+                  <Label>Category *</Label>
                   <Select value={newItem.category} onValueChange={(value) => setNewItem(prev => ({ ...prev, category: value }))}>
                     <SelectTrigger>
                       <SelectValue placeholder="Select category" />
                     </SelectTrigger>
                     <SelectContent>
-                      {categories.map(cat => (
-                        <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+                      {categories.map((category) => (
+                        <SelectItem key={category} value={category}>{category}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
                 </div>
-              </div>
-              
-              <div className="space-y-4">
+
                 <div>
-                  <Label htmlFor="itemStock">Stock Quantity</Label>
+                  <Label>Price (₹) *</Label>
                   <Input
-                    id="itemStock"
                     type="number"
-                    value={newItem.stock}
-                    onChange={(e) => setNewItem(prev => ({ ...prev, stock: e.target.value }))}
+                    value={newItem.price}
+                    onChange={(e) => setNewItem(prev => ({ ...prev, price: e.target.value }))}
                     placeholder="0"
                   />
                 </div>
-                
+
                 <div>
-                  <Label htmlFor="prepTime">Preparation Time (minutes)</Label>
+                  <Label>Stock Quantity</Label>
                   <Input
-                    id="prepTime"
                     type="number"
-                    value={newItem.preparationTime}
-                    onChange={(e) => setNewItem(prev => ({ ...prev, preparationTime: e.target.value }))}
+                    value={newItem.stock}
+                    onChange={(e) => setNewItem(prev => ({ ...prev, stock: e.target.value }))}
                     placeholder="10"
                   />
                 </div>
-                
+              </div>
+
+              <div className="space-y-4">
                 <div>
-                  <Label htmlFor="spiceLevel">Spice Level</Label>
-                  <Select value={newItem.spiceLevel} onValueChange={(value) => setNewItem(prev => ({ ...prev, spiceLevel: value }))}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {spiceLevels.map(level => (
-                        <SelectItem key={level} value={level}>{level}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                
-                <div>
-                  <Label htmlFor="allergens">Allergens (comma-separated)</Label>
+                  <Label>Description</Label>
                   <Input
-                    id="allergens"
-                    value={newItem.allergens}
-                    onChange={(e) => setNewItem(prev => ({ ...prev, allergens: e.target.value }))}
-                    placeholder="e.g., Dairy, Nuts, Gluten"
+                    value={newItem.description}
+                    onChange={(e) => setNewItem(prev => ({ ...prev, description: e.target.value }))}
+                    placeholder="Brief description"
                   />
                 </div>
-                
-                <div className="flex items-center space-x-2">
-                  <Switch
-                    id="isVeg"
-                    checked={newItem.isVeg}
-                    onCheckedChange={(checked) => setNewItem(prev => ({ ...prev, isVeg: checked }))}
+
+                <div>
+                  <Label>Variants (comma separated)</Label>
+                  <Input
+                    value={newItem.variants}
+                    onChange={(e) => setNewItem(prev => ({ ...prev, variants: e.target.value }))}
+                    placeholder="Regular, Large"
                   />
-                  <Label htmlFor="isVeg">Vegetarian</Label>
+                </div>
+
+                <div>
+                  <Label>Add-ons (comma separated)</Label>
+                  <Input
+                    value={newItem.addOns}
+                    onChange={(e) => setNewItem(prev => ({ ...prev, addOns: e.target.value }))}
+                    placeholder="Extra Rice, Naan"
+                  />
                 </div>
               </div>
             </div>
@@ -356,51 +220,11 @@ export function MenuManagement() {
                 Cancel
               </Button>
               <Button onClick={handleAddItem}>
-                {editingItem ? "Update Item" : "Add Item"}
+                Add Item
               </Button>
             </div>
           </DialogContent>
         </Dialog>
-      </div>
-
-      {/* Stats Overview */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <Card className="border-0 shadow-lg bg-gradient-to-br from-blue-50 to-cyan-100">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium text-blue-700">Available Items</CardTitle>
-            <DollarSign className="h-4 w-4 text-blue-600" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-blue-900">{availableItems}</div>
-            <p className="text-xs text-blue-600">out of {menuItems.length} total items</p>
-          </CardContent>
-        </Card>
-
-        <Card className="border-0 shadow-lg bg-gradient-to-br from-purple-50 to-violet-100">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium text-purple-700">Categories</CardTitle>
-            <div className="w-8 h-8 bg-purple-500 rounded-full flex items-center justify-center">
-              <span className="text-white font-bold text-sm">{totalCategories}</span>
-            </div>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-purple-900">{totalCategories}</div>
-            <p className="text-xs text-purple-600">menu categories</p>
-          </CardContent>
-        </Card>
-
-        <Card className="border-0 shadow-lg bg-gradient-to-br from-orange-50 to-amber-100">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium text-orange-700">Low Stock</CardTitle>
-            <div className="w-8 h-8 bg-orange-500 rounded-full flex items-center justify-center">
-              <span className="text-white font-bold text-sm">{lowStockItems}</span>
-            </div>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-orange-900">{lowStockItems}</div>
-            <p className="text-xs text-orange-600">items need restocking</p>
-          </CardContent>
-        </Card>
       </div>
 
       {/* Filters */}
@@ -422,8 +246,8 @@ export function MenuManagement() {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All Categories</SelectItem>
-            {categories.map(cat => (
-              <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+            {categories.map((category) => (
+              <SelectItem key={category} value={category}>{category}</SelectItem>
             ))}
           </SelectContent>
         </Select>
@@ -433,74 +257,72 @@ export function MenuManagement() {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {filteredItems.map((item) => (
           <Card key={item.id} className="border-0 shadow-lg hover:shadow-xl transition-shadow">
-            <CardHeader className="pb-3">
-              <div className="flex items-start justify-between">
-                <div className="flex-1">
-                  <CardTitle className="text-lg flex items-center">
-                    {item.name}
-                    {item.isVeg && <span className="ml-2 text-green-600 text-sm">🌱</span>}
-                  </CardTitle>
-                  <div className="flex items-center space-x-2 mt-1">
-                    <Badge variant="outline" className="text-xs">
-                      {item.category}
-                    </Badge>
-                    {item.spiceLevel !== "None" && (
-                      <Badge variant="outline" className="text-xs">
-                        {item.spiceLevel}
-                      </Badge>
-                    )}
-                  </div>
-                </div>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <CardTitle className="flex items-center">
+                  <ChefHat className="h-5 w-5 mr-2 text-purple-600" />
+                  {item.name}
+                </CardTitle>
                 <div className="flex items-center space-x-2">
                   <Switch
                     checked={item.available}
                     onCheckedChange={() => toggleAvailability(item.id)}
-                    size="sm"
                   />
+                  <Badge className={item.available ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}>
+                    {item.available ? "Available" : "Unavailable"}
+                  </Badge>
                 </div>
               </div>
+              <CardDescription>{item.category}</CardDescription>
             </CardHeader>
-            
-            <CardContent className="space-y-3">
-              <p className="text-sm text-gray-600 line-clamp-2">{item.description}</p>
-              
-              <div className="flex justify-between items-center">
-                <div className="text-2xl font-bold text-green-600">₹{item.price}</div>
-                <div className="text-sm text-gray-500">{item.preparationTime} min</div>
+            <CardContent className="space-y-4">
+              <div>
+                <p className="text-sm text-gray-600 mb-2">{item.description}</p>
+                <div className="flex justify-between items-center">
+                  <span className="text-2xl font-bold text-green-600">₹{item.price}</span>
+                  <span className="text-sm text-gray-500">Stock: {item.stock}</span>
+                </div>
               </div>
-              
-              <div className="flex justify-between items-center text-sm">
-                <span className={`${item.stock < 10 ? 'text-red-600' : 'text-gray-600'}`}>
-                  Stock: {item.stock}
-                </span>
-                <Badge className={item.available ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}>
-                  {item.available ? "Available" : "Unavailable"}
-                </Badge>
-              </div>
-              
-              {item.allergens.length > 0 && (
-                <div className="text-xs text-gray-500">
-                  Allergens: {item.allergens.join(', ')}
+
+              {item.variants.length > 0 && (
+                <div>
+                  <h4 className="font-medium text-sm mb-2">Variants:</h4>
+                  <div className="flex flex-wrap gap-1">
+                    {item.variants.map((variant, index) => (
+                      <Badge key={index} variant="outline" className="text-xs">
+                        {variant}
+                      </Badge>
+                    ))}
+                  </div>
                 </div>
               )}
-              
-              <div className="flex space-x-2 pt-2 border-t">
-                <Button 
-                  size="sm" 
-                  variant="outline"
-                  onClick={() => handleEditItem(item)}
-                  className="flex-1"
-                >
+
+              {item.addOns.length > 0 && (
+                <div>
+                  <h4 className="font-medium text-sm mb-2">Add-ons:</h4>
+                  <div className="flex flex-wrap gap-1">
+                    {item.addOns.map((addOn, index) => (
+                      <Badge key={index} variant="outline" className="text-xs bg-blue-50 text-blue-700">
+                        {addOn}
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="flex justify-between items-center pt-3 border-t">
+                <Button variant="outline" size="sm">
                   <Edit className="h-4 w-4 mr-1" />
                   Edit
                 </Button>
                 <Button 
+                  variant="outline" 
                   size="sm" 
-                  variant="outline"
                   onClick={() => deleteItem(item.id)}
                   className="text-red-600 hover:text-red-700 hover:bg-red-50"
                 >
-                  <Trash2 className="h-4 w-4" />
+                  <Trash2 className="h-4 w-4 mr-1" />
+                  Delete
                 </Button>
               </div>
             </CardContent>
@@ -511,7 +333,7 @@ export function MenuManagement() {
       {filteredItems.length === 0 && (
         <Card className="border-0 shadow-lg">
           <CardContent className="flex flex-col items-center justify-center py-12">
-            <DollarSign className="h-12 w-12 text-gray-400 mb-4" />
+            <ChefHat className="h-12 w-12 text-gray-400 mb-4" />
             <h3 className="text-lg font-medium text-gray-900 mb-2">No menu items found</h3>
             <p className="text-gray-500 text-center">
               {searchTerm || selectedCategory !== "all" 
