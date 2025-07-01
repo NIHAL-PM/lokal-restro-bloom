@@ -1,4 +1,3 @@
-
 import { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -88,14 +87,12 @@ export function OrderManagement() {
 
   const calculateOrderTotal = () => {
     const subtotal = selectedItems.reduce((sum, item) => sum + (item.price * item.quantity), 0);
-    const serviceCharge = (subtotal * 10) / 100; // 10% service charge
-    const tax = ((subtotal + serviceCharge) * 18) / 100; // 18% GST
-    return {
-      subtotal,
-      serviceCharge,
-      tax,
-      total: subtotal + serviceCharge + tax
-    };
+    const settings = databaseService.getData().settings;
+    const tax = subtotal * (settings.taxRate / 100);
+    const serviceCharge = subtotal * (settings.serviceChargeRate / 100);
+    const total = subtotal + tax + serviceCharge;
+    
+    return { subtotal, tax, serviceCharge, total };
   };
 
   const handleCreateOrder = () => {
@@ -127,13 +124,12 @@ export function OrderManagement() {
     }
 
     const totals = calculateOrderTotal();
-    
-    const order = databaseService.createOrder({
+    const orderData = {
       type: newOrder.type,
       tableId: newOrder.type === 'dine-in' ? newOrder.tableId : undefined,
       roomId: newOrder.type === 'room-service' ? newOrder.roomId : undefined,
       items: selectedItems,
-      status: 'pending',
+      status: 'pending' as const,
       waiterId: newOrder.waiterId,
       timestamp: new Date().toISOString(),
       notes: newOrder.notes,
@@ -142,44 +138,46 @@ export function OrderManagement() {
       serviceCharge: totals.serviceCharge,
       discount: 0,
       total: totals.total
-    });
+    };
 
-    // Update table/room status
+    const createdOrder = databaseService.createOrder(orderData);
+
+    // Update table status if dine-in
     if (newOrder.type === 'dine-in' && newOrder.tableId) {
       databaseService.updateTable(newOrder.tableId, {
         status: 'occupied',
-        currentOrderId: order.id,
+        currentOrderId: createdOrder.id,
         occupiedSince: new Date().toISOString()
       });
     }
 
+    // Add order to room if room service
     if (newOrder.type === 'room-service' && newOrder.roomId) {
       const room = rooms.find(r => r.id === newOrder.roomId);
       if (room) {
-        databaseService.updateRoom(newOrder.roomId, {
-          orderIds: [...room.orderIds, order.id]
-        });
+        const updatedOrderIds = [...room.orderIds, createdOrder.id];
+        databaseService.updateRoom(newOrder.roomId, { orderIds: updatedOrderIds });
       }
     }
 
-    // Sync order creation
+    // Sync the new order
     syncService.broadcast({
       type: 'order',
       action: 'create',
-      data: order,
+      data: createdOrder,
       timestamp: Date.now(),
       deviceId: syncService.getDeviceId()
     });
 
-    // Play sound notification
+    // Play sound and show notification
     soundService.playNewOrderChime();
-
     toast({
       title: "Order Created",
-      description: `Order ${order.id} has been created successfully`,
+      description: `Order ${createdOrder.id} has been created successfully`,
     });
 
     // Reset form
+    setSelectedItems([]);
     setNewOrder({
       type: 'dine-in',
       tableId: '',
@@ -187,7 +185,6 @@ export function OrderManagement() {
       waiterId: 'current-user',
       notes: ''
     });
-    setSelectedItems([]);
     setShowCreateDialog(false);
   };
 
@@ -253,45 +250,52 @@ export function OrderManagement() {
 
   const getStatusColor = (status: Order['status']) => {
     switch (status) {
-      case "pending": return "bg-red-100 text-red-800";
-      case "preparing": return "bg-yellow-100 text-yellow-800";
-      case "ready": return "bg-green-100 text-green-800";
-      case "served": return "bg-blue-100 text-blue-800";
-      case "cancelled": return "bg-gray-100 text-gray-800";
-      default: return "bg-gray-100 text-gray-800";
+      case "pending": return "bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-300";
+      case "preparing": return "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-300";
+      case "ready": return "bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-300";
+      case "served": return "bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-300";
+      case "cancelled": return "bg-gray-100 text-gray-800 dark:bg-gray-900/20 dark:text-gray-300";
+      default: return "bg-gray-100 text-gray-800 dark:bg-gray-900/20 dark:text-gray-300";
     }
   };
 
   const filteredOrders = orders.filter(order => {
-    const matchesSearch = order.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         (order.tableId && order.tableId.toLowerCase().includes(searchTerm.toLowerCase())) ||
-                         (order.roomId && order.roomId.toLowerCase().includes(searchTerm.toLowerCase()));
-    const matchesType = selectedType === "all" || order.type === selectedType;
+    const matchesSearch = order.id.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesType = selectedType === 'all' || order.type === selectedType;
     return matchesSearch && matchesType;
   });
 
-  const availableTables = tables.filter(table => table.status === 'free');
-  const availableRooms = rooms.filter(room => room.status === 'occupied' && room.guest);
+  const resetCreateDialog = () => {
+    setSelectedItems([]);
+    setNewOrder({
+      type: 'dine-in',
+      tableId: '',
+      roomId: '',
+      waiterId: 'current-user',
+      notes: ''
+    });
+    setShowCreateDialog(false);
+  };
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Order Management</h1>
-          <p className="text-gray-500 mt-1">Create and manage customer orders</p>
+          <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">Order Management</h1>
+          <p className="text-gray-500 dark:text-gray-400 mt-1">Create and manage customer orders</p>
         </div>
         
-        <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
+        <Dialog open={showCreateDialog} onOpenChange={resetCreateDialog}>
           <DialogTrigger asChild>
-            <Button className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700">
+            <Button className="bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700">
               <Plus className="h-4 w-4 mr-2" />
               New Order
             </Button>
           </DialogTrigger>
-          <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogContent className="max-w-4xl">
             <DialogHeader>
               <DialogTitle>Create New Order</DialogTitle>
-              <DialogDescription>Add items and details for the new order</DialogDescription>
+              <DialogDescription>Add items and create a new customer order</DialogDescription>
             </DialogHeader>
             
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -299,27 +303,42 @@ export function OrderManagement() {
               <div className="space-y-4">
                 <div>
                   <Label>Order Type</Label>
-                  <Select value={newOrder.type} onValueChange={(value: 'dine-in' | 'takeaway' | 'room-service') => setNewOrder(prev => ({ ...prev, type: value }))}>
+                  <Select value={newOrder.type} onValueChange={(value: any) => setNewOrder(prev => ({ ...prev, type: value }))}>
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="dine-in">Dine In</SelectItem>
-                      <SelectItem value="takeaway">Takeaway</SelectItem>
-                      <SelectItem value="room-service">Room Service</SelectItem>
+                      <SelectItem value="dine-in">
+                        <div className="flex items-center">
+                          <Users className="h-4 w-4 mr-2" />
+                          Dine In
+                        </div>
+                      </SelectItem>
+                      <SelectItem value="takeaway">
+                        <div className="flex items-center">
+                          <Clock className="h-4 w-4 mr-2" />
+                          Takeaway
+                        </div>
+                      </SelectItem>
+                      <SelectItem value="room-service">
+                        <div className="flex items-center">
+                          <Bed className="h-4 w-4 mr-2" />
+                          Room Service
+                        </div>
+                      </SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
 
                 {newOrder.type === 'dine-in' && (
                   <div>
-                    <Label>Table</Label>
+                    <Label>Select Table</Label>
                     <Select value={newOrder.tableId} onValueChange={(value) => setNewOrder(prev => ({ ...prev, tableId: value }))}>
                       <SelectTrigger>
-                        <SelectValue placeholder="Select table" />
+                        <SelectValue placeholder="Choose table" />
                       </SelectTrigger>
                       <SelectContent>
-                        {availableTables.map((table) => (
+                        {tables.filter(table => table.status === 'free').map((table) => (
                           <SelectItem key={table.id} value={table.id}>
                             Table {table.number} (Capacity: {table.capacity})
                           </SelectItem>
@@ -331,15 +350,15 @@ export function OrderManagement() {
 
                 {newOrder.type === 'room-service' && (
                   <div>
-                    <Label>Room</Label>
+                    <Label>Select Room</Label>
                     <Select value={newOrder.roomId} onValueChange={(value) => setNewOrder(prev => ({ ...prev, roomId: value }))}>
                       <SelectTrigger>
-                        <SelectValue placeholder="Select room" />
+                        <SelectValue placeholder="Choose room" />
                       </SelectTrigger>
                       <SelectContent>
-                        {availableRooms.map((room) => (
+                        {rooms.filter(room => room.status === 'occupied').map((room) => (
                           <SelectItem key={room.id} value={room.id}>
-                            {room.number} - {room.guest?.name}
+                            Room {room.number} - {room.guest?.name}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -348,107 +367,128 @@ export function OrderManagement() {
                 )}
 
                 <div>
-                  <Label>Notes</Label>
+                  <Label>Notes (Optional)</Label>
                   <Textarea
                     value={newOrder.notes}
                     onChange={(e) => setNewOrder(prev => ({ ...prev, notes: e.target.value }))}
-                    placeholder="Special instructions..."
+                    placeholder="Special instructions or notes"
+                    rows={3}
                   />
                 </div>
 
                 {/* Selected Items */}
                 <div>
-                  <Label>Selected Items</Label>
-                  <div className="space-y-2 max-h-40 overflow-y-auto">
-                    {selectedItems.map((item, index) => (
-                      <div key={index} className="flex items-center justify-between p-2 bg-gray-50 rounded">
-                        <div className="flex-1">
-                          <span className="font-medium">{item.name}</span>
-                          <span className="text-sm text-gray-500 ml-2">₹{item.price}</span>
+                  <Label>Selected Items ({selectedItems.length})</Label>
+                  <div className="max-h-64 overflow-y-auto space-y-2 border rounded-lg p-3">
+                    {selectedItems.length === 0 ? (
+                      <p className="text-gray-500 dark:text-gray-400 text-center py-4">No items selected</p>
+                    ) : (
+                      selectedItems.map((item, index) => (
+                        <div key={index} className="flex items-center justify-between p-2 bg-gray-50 dark:bg-gray-800 rounded">
+                          <div>
+                            <span className="font-medium">{item.name}</span>
+                            <p className="text-sm text-gray-600 dark:text-gray-400">₹{item.price} each</p>
+                          </div>
+                          <div className="flex items-center space-x-2">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => updateItemQuantity(index, item.quantity - 1)}
+                            >
+                              -
+                            </Button>
+                            <span className="w-8 text-center">{item.quantity}</span>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => updateItemQuantity(index, item.quantity + 1)}
+                            >
+                              +
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => removeItemFromOrder(index)}
+                              className="text-red-600 hover:text-red-700"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
                         </div>
-                        <div className="flex items-center space-x-2">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => updateItemQuantity(index, item.quantity - 1)}
-                          >
-                            -
-                          </Button>
-                          <span className="w-8 text-center">{item.quantity}</span>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => updateItemQuantity(index, item.quantity + 1)}
-                          >
-                            +
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => removeItemFromOrder(index)}
-                            className="text-red-600"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </div>
-                    ))}
+                      ))
+                    )}
                   </div>
-                  
-                  {selectedItems.length > 0 && (
-                    <div className="mt-3 p-3 bg-blue-50 rounded">
-                      <div className="text-sm space-y-1">
-                        <div className="flex justify-between">
-                          <span>Subtotal:</span>
-                          <span>₹{calculateOrderTotal().subtotal.toFixed(2)}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span>Service Charge (10%):</span>
-                          <span>₹{calculateOrderTotal().serviceCharge.toFixed(2)}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span>Tax (18%):</span>
-                          <span>₹{calculateOrderTotal().tax.toFixed(2)}</span>
-                        </div>
-                        <div className="flex justify-between font-bold text-lg border-t pt-1">
-                          <span>Total:</span>
-                          <span>₹{calculateOrderTotal().total.toFixed(2)}</span>
-                        </div>
+                </div>
+
+                {selectedItems.length > 0 && (
+                  <div className="p-3 bg-green-50 dark:bg-green-900/20 rounded-lg">
+                    <div className="space-y-1 text-sm">
+                      <div className="flex justify-between">
+                        <span>Subtotal:</span>
+                        <span>₹{calculateOrderTotal().subtotal.toFixed(2)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Tax:</span>
+                        <span>₹{calculateOrderTotal().tax.toFixed(2)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Service Charge:</span>
+                        <span>₹{calculateOrderTotal().serviceCharge.toFixed(2)}</span>
+                      </div>
+                      <div className="flex justify-between font-bold text-lg border-t pt-1">
+                        <span>Total:</span>
+                        <span>₹{calculateOrderTotal().total.toFixed(2)}</span>
                       </div>
                     </div>
-                  )}
-                </div>
+                  </div>
+                )}
               </div>
 
               {/* Menu Items */}
-              <div>
-                <Label>Add Menu Items</Label>
-                <div className="space-y-2 max-h-96 overflow-y-auto">
-                  {menuItems.filter(item => item.available).map((item) => (
-                    <div
-                      key={item.id}
-                      className="flex items-center justify-between p-3 border rounded cursor-pointer hover:bg-gray-50"
-                      onClick={() => addItemToOrder(item)}
-                    >
-                      <div className="flex-1">
-                        <h4 className="font-medium">{item.name}</h4>
-                        <p className="text-sm text-gray-500">{item.description}</p>
-                        <p className="text-sm text-green-600 font-semibold">₹{item.price}</p>
-                      </div>
-                      <Button size="sm">
-                        <Plus className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  ))}
+              <div className="space-y-4">
+                <div>
+                  <Label>Add Menu Items</Label>
+                  <div className="relative">
+                    <Search className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
+                    <Input
+                      placeholder="Search menu items..."
+                      className="pl-10"
+                    />
+                  </div>
                 </div>
+
+                <ScrollArea className="h-96">
+                  <div className="space-y-2 pr-4">
+                    {menuItems.filter(item => item.available).map((item) => (
+                      <div key={item.id} className="flex items-center justify-between p-3 border rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800">
+                        <div className="flex-1">
+                          <h4 className="font-medium">{item.name}</h4>
+                          <p className="text-sm text-gray-600 dark:text-gray-400">{item.description}</p>
+                          <p className="text-sm font-semibold text-green-600 dark:text-green-400">₹{item.price}</p>
+                        </div>
+                        <Button
+                          size="sm"
+                          onClick={() => addItemToOrder(item)}
+                          className="bg-blue-600 hover:bg-blue-700"
+                        >
+                          Add
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                </ScrollArea>
               </div>
             </div>
 
             <div className="flex justify-end space-x-2 pt-4">
-              <Button variant="outline" onClick={() => setShowCreateDialog(false)}>
+              <Button variant="outline" onClick={resetCreateDialog}>
                 Cancel
               </Button>
-              <Button onClick={handleCreateOrder} disabled={selectedItems.length === 0}>
+              <Button 
+                onClick={handleCreateOrder}
+                disabled={selectedItems.length === 0}
+                className="bg-green-600 hover:bg-green-700"
+              >
                 Create Order
               </Button>
             </div>
@@ -474,7 +514,7 @@ export function OrderManagement() {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">All Orders</SelectItem>
+            <SelectItem value="all">All Types</SelectItem>
             <SelectItem value="dine-in">Dine In</SelectItem>
             <SelectItem value="takeaway">Takeaway</SelectItem>
             <SelectItem value="room-service">Room Service</SelectItem>
@@ -485,7 +525,7 @@ export function OrderManagement() {
       {/* Orders Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
         {filteredOrders.map((order) => (
-          <Card key={order.id} className="border-0 shadow-lg hover:shadow-xl transition-shadow">
+          <Card key={order.id} className="border-0 shadow-lg hover:shadow-xl transition-shadow dark:bg-gray-800">
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between">
                 <CardTitle className="text-lg">{order.id}</CardTitle>
@@ -566,14 +606,14 @@ export function OrderManagement() {
       </div>
 
       {filteredOrders.length === 0 && (
-        <Card className="border-0 shadow-lg">
+        <Card className="border-0 shadow-lg dark:bg-gray-800">
           <CardContent className="flex flex-col items-center justify-center py-12">
-            <Clock className="h-12 w-12 text-gray-400 mb-4" />
-            <h3 className="text-lg font-medium text-gray-900 mb-2">No orders found</h3>
-            <p className="text-gray-500 text-center">
-              {searchTerm || selectedType !== "all" 
-                ? "Try adjusting your search or filter criteria" 
-                : "Create your first order to get started"
+            <AlertCircle className="h-12 w-12 text-gray-400 mb-4" />
+            <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-2">No orders found</h3>
+            <p className="text-gray-500 dark:text-gray-400 text-center">
+              {searchTerm || selectedType !== 'all' 
+                ? 'Try adjusting your search or filter criteria' 
+                : 'Create your first order to get started'
               }
             </p>
           </CardContent>

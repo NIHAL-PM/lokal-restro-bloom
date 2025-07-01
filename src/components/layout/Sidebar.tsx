@@ -1,21 +1,24 @@
 
+import { useState, useEffect } from "react";
+import { NavLink, useLocation } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { 
-  House, 
-  Plus, 
-  Printer, 
+  Home, 
+  ShoppingCart, 
+  ChefHat, 
+  Receipt, 
   Table, 
-  Menu, 
-  Bed, 
-  FileText, 
+  UtensilsCrossed,
+  Bed,
+  BarChart,
   Settings,
+  Users,
   ChevronLeft,
-  ChevronRight,
-  Shield
+  Restaurant
 } from "lucide-react";
-import { Link, useLocation } from "react-router-dom";
-import { useEffect, useState } from "react";
 import { databaseService } from "@/services/databaseService";
 
 interface SidebarProps {
@@ -26,97 +29,176 @@ interface SidebarProps {
 
 export function Sidebar({ isOpen, onToggle, userRole }: SidebarProps) {
   const location = useLocation();
-  const [settings, setSettings] = useState(databaseService.getData().settings);
+  const [data, setData] = useState(databaseService.getData());
 
   useEffect(() => {
-    const unsubscribe = databaseService.subscribe((data) => {
-      setSettings(data.settings);
-    });
+    const unsubscribe = databaseService.subscribe(setData);
     return unsubscribe;
   }, []);
 
-  const menuItems = [
-    { icon: House, label: "Dashboard", path: "/", roles: ["admin", "waiter", "cashier"] },
-    { icon: Plus, label: "Orders", path: "/orders", roles: ["admin", "waiter"] },
-    { icon: Printer, label: "Kitchen", path: "/kitchen", roles: ["admin", "chef"], enabled: settings.modules.kds },
-    { icon: FileText, label: "Billing", path: "/billing", roles: ["admin", "cashier"] },
-    { icon: Table, label: "Tables", path: "/tables", roles: ["admin", "waiter"] },
-    { icon: Menu, label: "Menu", path: "/menu", roles: ["admin"] },
-    { icon: Bed, label: "Rooms", path: "/rooms", roles: ["admin", "waiter", "housekeeping"], enabled: settings.modules.roomManagement },
-    { icon: FileText, label: "Reports", path: "/reports", roles: ["admin", "cashier"], enabled: settings.modules.reports },
-    { icon: Shield, label: "Admin Tools", path: "/admin", roles: ["admin"] },
-    { icon: Settings, label: "Settings", path: "/settings", roles: ["admin"] },
+  const pendingOrders = data.orders.filter(order => order.status === 'pending').length;
+  const readyOrders = data.orders.filter(order => order.status === 'ready').length;
+  const occupiedTables = data.tables.filter(table => table.status === 'occupied').length;
+  const occupiedRooms = data.rooms.filter(room => room.status === 'occupied').length;
+
+  const navigationItems = [
+    {
+      title: "Dashboard",
+      href: "/",
+      icon: Home,
+      roles: ['admin', 'waiter', 'chef', 'cashier', 'housekeeping']
+    },
+    {
+      title: "Orders",
+      href: "/orders",
+      icon: ShoppingCart,
+      badge: pendingOrders > 0 ? pendingOrders : undefined,
+      roles: ['admin', 'waiter']
+    },
+    {
+      title: "Kitchen Display",
+      href: "/kitchen",
+      icon: ChefHat,
+      badge: pendingOrders > 0 ? pendingOrders : undefined,
+      roles: ['admin', 'chef', 'waiter']
+    },
+    {
+      title: "Billing",
+      href: "/billing",
+      icon: Receipt,
+      badge: readyOrders > 0 ? readyOrders : undefined,
+      roles: ['admin', 'cashier', 'waiter']
+    },
+    {
+      title: "Tables",
+      href: "/tables",
+      icon: Table,
+      badge: occupiedTables > 0 ? occupiedTables : undefined,
+      roles: ['admin', 'waiter', 'cashier']
+    },
+    {
+      title: "Menu",
+      href: "/menu",
+      icon: UtensilsCrossed,
+      roles: ['admin', 'chef']
+    },
+    {
+      title: "Rooms",
+      href: "/rooms",
+      icon: Bed,
+      badge: occupiedRooms > 0 ? occupiedRooms : undefined,
+      roles: ['admin', 'housekeeping', 'waiter'],
+      hidden: !data.settings.modules.roomManagement
+    },
+    {
+      title: "Reports",
+      href: "/reports",
+      icon: BarChart,
+      roles: ['admin', 'cashier']
+    },
+    {
+      title: "Admin",
+      href: "/admin",
+      icon: Users,
+      roles: ['admin']
+    },
+    {
+      title: "Settings",
+      href: "/settings",
+      icon: Settings,
+      roles: ['admin']
+    }
   ];
 
-  const filteredItems = menuItems.filter(item => 
-    item.roles.includes(userRole.toLowerCase()) && (item.enabled !== false)
+  const visibleItems = navigationItems.filter(item => 
+    !item.hidden && item.roles.includes(userRole)
   );
 
+  const isActive = (href: string) => {
+    if (href === '/') {
+      return location.pathname === '/';
+    }
+    return location.pathname.startsWith(href);
+  };
+
   return (
-    <div className={cn(
-      "bg-white border-r border-gray-200 transition-all duration-300 ease-in-out",
-      isOpen ? "w-64" : "w-16"
-    )}>
-      <div className="flex flex-col h-full">
-        <div className="p-4 border-b border-gray-200">
-          <div className="flex items-center justify-between">
-            {isOpen && (
-              <div className="flex items-center space-x-2">
-                <div 
-                  className="w-8 h-8 rounded-lg flex items-center justify-center"
-                  style={{ background: `linear-gradient(135deg, ${settings.primaryColor}, ${settings.primaryColor}CC)` }}
-                >
-                  {settings.logo ? (
-                    <img src={settings.logo} alt="Logo" className="w-6 h-6 object-contain" />
-                  ) : (
-                    <span className="text-white font-bold text-sm">LR</span>
-                  )}
-                </div>
-                <h1 className="text-xl font-bold text-gray-900">{settings.restaurantName}</h1>
-              </div>
-            )}
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={onToggle}
-              className="p-2"
-            >
-              {isOpen ? <ChevronLeft className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-            </Button>
+    <>
+      {/* Overlay for mobile */}
+      {isOpen && (
+        <div 
+          className="fixed inset-0 bg-black bg-opacity-50 z-40 md:hidden"
+          onClick={onToggle}
+        />
+      )}
+
+      {/* Sidebar */}
+      <div className={cn(
+        "fixed left-0 top-0 z-50 h-full bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-700 transition-transform duration-300 ease-in-out",
+        isOpen ? "translate-x-0" : "-translate-x-full",
+        "md:relative md:translate-x-0",
+        "w-64"
+      )}>
+        {/* Header */}
+        <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
+          <div className="flex items-center space-x-3">
+            <div className="bg-gradient-to-r from-blue-600 to-cyan-600 p-2 rounded-lg">
+              <Restaurant className="h-6 w-6 text-white" />
+            </div>
+            <div>
+              <h1 className="text-lg font-bold text-gray-900 dark:text-gray-100">LokalRestro</h1>
+              <p className="text-xs text-gray-500 dark:text-gray-400">v1.0.0</p>
+            </div>
           </div>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={onToggle}
+            className="md:hidden"
+          >
+            <ChevronLeft className="h-4 w-4" />
+          </Button>
         </div>
 
-        <nav className="flex-1 p-4 space-y-2">
-          {filteredItems.map((item) => {
-            const isActive = location.pathname === item.path;
-            return (
-              <Link key={item.path} to={item.path}>
-                <Button
-                  variant={isActive ? "default" : "ghost"}
-                  className={cn(
-                    "w-full justify-start transition-all duration-200",
-                    isActive 
-                      ? "text-white hover:opacity-90 shadow-md" 
-                      : "text-gray-700 hover:bg-gray-100",
-                    !isOpen && "px-2"
-                  )}
-                  style={isActive ? { backgroundColor: settings.primaryColor } : {}}
-                >
-                  <item.icon className={cn("h-5 w-5", isOpen && "mr-3")} />
-                  {isOpen && <span>{item.label}</span>}
-                </Button>
-              </Link>
-            );
-          })}
-        </nav>
+        {/* Navigation */}
+        <ScrollArea className="flex-1 px-3 py-4">
+          <nav className="space-y-2">
+            {visibleItems.map((item) => (
+              <NavLink
+                key={item.href}
+                to={item.href}
+                className={({ isActive: navIsActive }) => cn(
+                  "flex items-center space-x-3 px-3 py-2.5 text-sm font-medium rounded-lg transition-colors",
+                  (navIsActive || isActive(item.href))
+                    ? "bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300"
+                    : "text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
+                )}
+                onClick={() => {
+                  // Close sidebar on mobile after navigation
+                  if (window.innerWidth < 768) {
+                    onToggle();
+                  }
+                }}
+              >
+                <item.icon className="h-5 w-5 flex-shrink-0" />
+                <span className="flex-1">{item.title}</span>
+                {item.badge && (
+                  <Badge className="bg-red-500 text-white text-xs px-1.5 py-0.5 min-w-[1.25rem] h-5">
+                    {item.badge}
+                  </Badge>
+                )}
+              </NavLink>
+            ))}
+          </nav>
+        </ScrollArea>
 
-        <div className="p-4 border-t border-gray-200">
-          <div className="flex items-center space-x-2 text-sm text-gray-500">
-            <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-            {isOpen && <span>Online • LAN Sync Active</span>}
+        {/* Footer */}
+        <div className="p-4 border-t border-gray-200 dark:border-gray-700">
+          <div className="text-xs text-gray-500 dark:text-gray-400 text-center">
+            <p>Offline Mode Ready</p>
+            <p>LAN Sync Active</p>
           </div>
         </div>
       </div>
-    </div>
+    </>
   );
 }
