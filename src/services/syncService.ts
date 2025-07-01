@@ -15,13 +15,23 @@ interface SyncMessage {
   deviceId: string;
 }
 
+export interface ConnectedDevice {
+  id: string;
+  name: string;
+  ip: string;
+  role: string;
+  status: 'online' | 'offline';
+  ping?: number;
+  lastSeen: string;
+}
+
 class SyncService {
   private ws: WebSocket | null = null;
   private deviceId: string;
   private syncListeners: ((data: SyncData) => void)[] = [];
   private reconnectInterval: NodeJS.Timeout | null = null;
   private heartbeatInterval: NodeJS.Timeout | null = null;
-  private connectedDevices: Set<string> = new Set();
+  private connectedDevices: Map<string, ConnectedDevice> = new Map();
   private isConnected: boolean = false;
   private useWebSocket: boolean = true;
   private fallbackSyncInterval: NodeJS.Timeout | null = null;
@@ -32,6 +42,7 @@ class SyncService {
     this.deviceId = this.generateDeviceId();
     this.connect();
     this.startFallbackSync();
+    this.startDeviceDiscovery();
   }
 
   private generateDeviceId(): string {
@@ -45,7 +56,7 @@ class SyncService {
 
   private connect(): void {
     try {
-      // Try WebSocket connection first
+      // Try WebSocket connection first (fallback for HTTPS environments)
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       const wsUrl = `${protocol}//localhost:8765`;
       
@@ -125,7 +136,7 @@ class SyncService {
       const syncData = this.syncQueue.shift();
       if (syncData) {
         localStorage.setItem('lokalrestro_sync', JSON.stringify(syncData));
-        localStorage.removeItem('lokalrestro_sync'); // Clear after setting to trigger event
+        setTimeout(() => localStorage.removeItem('lokalrestro_sync'), 100);
       }
     }
   }
@@ -154,13 +165,29 @@ class SyncService {
         }
         break;
       case 'heartbeat':
-        this.connectedDevices.add(message.deviceId);
+        this.updateDeviceStatus(message.deviceId, 'online');
         break;
       case 'discovery':
-        this.connectedDevices.add(message.deviceId);
+        this.updateDeviceStatus(message.deviceId, 'online');
         this.sendHeartbeat();
         break;
     }
+  }
+
+  private updateDeviceStatus(deviceId: string, status: 'online' | 'offline'): void {
+    if (deviceId === this.deviceId) return;
+    
+    const existing = this.connectedDevices.get(deviceId);
+    const device: ConnectedDevice = {
+      id: deviceId,
+      name: existing?.name || `Device-${deviceId.slice(-4)}`,
+      ip: existing?.ip || '192.168.1.xxx',
+      role: existing?.role || 'unknown',
+      status,
+      lastSeen: new Date().toISOString()
+    };
+    
+    this.connectedDevices.set(deviceId, device);
   }
 
   private sendMessage(message: SyncMessage): void {
@@ -220,6 +247,32 @@ class SyncService {
     });
   }
 
+  private startDeviceDiscovery(): void {
+    // Simulate LAN device discovery
+    setInterval(() => {
+      this.discoverLocalDevices();
+    }, 60000); // Check every minute
+  }
+
+  private async discoverLocalDevices(): Promise<void> {
+    // Simulate discovering devices on local network
+    const simulatedDevices = [
+      { id: 'kitchen-pos-001', name: 'Kitchen Display', ip: '192.168.1.101', role: 'KDS' },
+      { id: 'counter-pos-002', name: 'Counter Terminal', ip: '192.168.1.102', role: 'Billing' },
+      { id: 'mobile-waiter-003', name: 'Waiter Mobile', ip: '192.168.1.103', role: 'Orders' }
+    ];
+
+    simulatedDevices.forEach(device => {
+      if (!this.connectedDevices.has(device.id)) {
+        this.connectedDevices.set(device.id, {
+          ...device,
+          status: 'online',
+          lastSeen: new Date().toISOString()
+        });
+      }
+    });
+  }
+
   // Public API
   broadcast(data: SyncData): void {
     if (this.useWebSocket && this.isConnected) {
@@ -247,8 +300,8 @@ class SyncService {
     };
   }
 
-  getConnectedDevices(): string[] {
-    return Array.from(this.connectedDevices);
+  getConnectedDevices(): ConnectedDevice[] {
+    return Array.from(this.connectedDevices.values());
   }
 
   getDeviceId(): string {
@@ -313,6 +366,28 @@ class SyncService {
         resolve(Math.random() * 100 + 10); // Random ping between 10-110ms
       }, 100);
     });
+  }
+
+  async pingAllDevices(): Promise<void> {
+    const devices = Array.from(this.connectedDevices.keys());
+    for (const deviceId of devices) {
+      try {
+        const ping = await this.pingDevice(deviceId);
+        const device = this.connectedDevices.get(deviceId);
+        if (device) {
+          device.ping = ping;
+          device.status = 'online';
+          device.lastSeen = new Date().toISOString();
+          this.connectedDevices.set(deviceId, device);
+        }
+      } catch (error) {
+        const device = this.connectedDevices.get(deviceId);
+        if (device) {
+          device.status = 'offline';
+          this.connectedDevices.set(deviceId, device);
+        }
+      }
+    }
   }
 }
 

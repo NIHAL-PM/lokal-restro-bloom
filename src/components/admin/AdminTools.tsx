@@ -3,10 +3,7 @@ import { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Separator } from "@/components/ui/separator";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { 
   Server, 
@@ -106,8 +103,8 @@ export function AdminTools() {
     });
   };
 
-  const handlePingAllDevices = () => {
-    syncService.pingAllDevices();
+  const handlePingAllDevices = async () => {
+    await syncService.pingAllDevices();
     toast({
       title: "Ping Sent",
       description: "Pinging all devices on the network",
@@ -261,6 +258,7 @@ export function AdminTools() {
               <Button 
                 onClick={handleTestPrinter}
                 className="bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700"
+                size="sm"
               >
                 <Printer className="h-4 w-4 mr-2" />
                 Test Printer
@@ -270,6 +268,7 @@ export function AdminTools() {
                 onClick={handlePingAllDevices}
                 variant="outline"
                 className="border-2"
+                size="sm"
               >
                 <RefreshCw className="h-4 w-4 mr-2" />
                 Ping All Devices
@@ -278,6 +277,7 @@ export function AdminTools() {
               <Button 
                 onClick={handleBackupNow}
                 className="bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700"
+                size="sm"
               >
                 <Download className="h-4 w-4 mr-2" />
                 Backup Now
@@ -294,6 +294,7 @@ export function AdminTools() {
                 <Button 
                   variant="outline"
                   className="w-full border-2"
+                  size="sm"
                   onClick={() => document.getElementById('restore-file')?.click()}
                 >
                   <Upload className="h-4 w-4 mr-2" />
