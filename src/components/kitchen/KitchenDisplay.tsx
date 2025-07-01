@@ -200,7 +200,7 @@ export function KitchenDisplay() {
                   </CardTitle>
                   <div className="flex items-center space-x-2">
                     {priority === 'high' && (
-                      <AlertCircle className="h-4 w-4 text-red-500" title="High Priority" />
+                      <AlertCircle className="h-4 w-4 text-red-500" />
                     )}
                     <Badge className={getStatusColor(order.status)}>
                       {order.status}

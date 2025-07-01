@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { databaseService } from "@/services/databaseService";
-import { Restaurant, Lock, User, Wifi, WifiOff } from "lucide-react";
+import { ChefHat, Lock, User, Wifi, WifiOff } from "lucide-react";
 import { syncService } from "@/services/syncService";
 
 interface LoginScreenProps {
@@ -94,13 +94,13 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4">
+    <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900">
       <div className="w-full max-w-md space-y-6">
         {/* Header */}
         <div className="text-center">
           <div className="flex items-center justify-center mb-4">
-            <div className="bg-gradient-to-r from-blue-600 to-cyan-600 p-3 rounded-full">
-              <Restaurant className="h-8 w-8 text-white" />
+            <div className="bg-gradient-to-r from-blue-600 to-cyan-600 p-3 rounded-full shadow-lg">
+              <ChefHat className="h-8 w-8 text-white" />
             </div>
           </div>
           <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">LokalRestro</h1>
@@ -108,7 +108,7 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
         </div>
 
         {/* Sync Status */}
-        <Card className="border-0 shadow-lg dark:bg-gray-800">
+        <Card className="border-0 shadow-lg dark:bg-gray-800/90 backdrop-blur-sm">
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-2">
@@ -129,7 +129,7 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
         </Card>
 
         {/* Login Form */}
-        <Card className="border-0 shadow-xl dark:bg-gray-800">
+        <Card className="border-0 shadow-xl dark:bg-gray-800/90 backdrop-blur-sm">
           <CardHeader className="text-center">
             <CardTitle className="flex items-center justify-center">
               <Lock className="h-5 w-5 mr-2" />
@@ -152,7 +152,7 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
                           <User className="h-4 w-4 mr-2" />
                           {user.name}
                         </div>
-                        <Badge className={getRoleColor(user.role)} variant="outline">
+                        <Badge className={`${getRoleColor(user.role)} ml-2`} variant="outline">
                           {user.role}
                         </Badge>
                       </div>
@@ -197,7 +197,7 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
                   {user.name}
                 </div>
                 <div className="flex items-center space-x-2">
-                  <Badge className={getRoleColor(user.role)} variant="outline" className="text-xs">
+                  <Badge className={getRoleColor(user.role)} variant="outline">
                     {user.role}
                   </Badge>
                   <span className="text-gray-500 dark:text-gray-400">PIN: {user.pin}</span>

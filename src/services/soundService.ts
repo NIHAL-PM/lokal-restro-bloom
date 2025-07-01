@@ -138,9 +138,9 @@ class SoundService {
 
 export const soundService = new SoundService();
 
-// Extend window interface for global sound function
+// Global sound function
 declare global {
   interface Window {
-    playLokalSound: (type: string) => void;
+    playLokalSound?: (type: string) => void;
   }
 }
