@@ -1,5 +1,5 @@
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -10,47 +10,16 @@ import { Switch } from "@/components/ui/switch";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Plus, Search, Edit, Trash2, ChefHat } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { apiFetch } from "@/services/api";
+import { getAll, putItem, deleteItem as idbDeleteItem } from "@/services/indexedDb";
 
 export function MenuManagement() {
   const { toast } = useToast();
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("all");
   
-  const [menuItems, setMenuItems] = useState([
-    {
-      id: "1",
-      name: "Butter Chicken",
-      category: "Main Course",
-      price: 350,
-      description: "Creamy tomato-based chicken curry",
-      available: true,
-      stock: 25,
-      variants: ["Regular", "Large"],
-      addOns: ["Extra Rice", "Naan"]
-    },
-    {
-      id: "2",
-      name: "Paneer Tikka",
-      category: "Starters",
-      price: 280,
-      description: "Grilled cottage cheese with spices",
-      available: true,
-      stock: 15,
-      variants: ["6pcs", "12pcs"],
-      addOns: ["Mint Chutney", "Onion Salad"]
-    },
-    {
-      id: "3",
-      name: "Fresh Lime Soda",
-      category: "Beverages",
-      price: 80,
-      description: "Refreshing lime drink",
-      available: false,
-      stock: 0,
-      variants: ["Sweet", "Salt", "Plain"],
-      addOns: []
-    }
-  ]);
+  const [menuItems, setMenuItems] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
 
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [newItem, setNewItem] = useState({
@@ -65,7 +34,7 @@ export function MenuManagement() {
 
   const categories = ["Starters", "Main Course", "Rice", "Bread", "Beverages", "Desserts"];
 
-  const handleAddItem = () => {
+  const handleAddItem = async () => {
     if (!newItem.name || !newItem.category || !newItem.price) {
       toast({
         title: "Incomplete Information",
@@ -74,42 +43,80 @@ export function MenuManagement() {
       });
       return;
     }
+    try {
+      const item = {
+        name: newItem.name,
+        category: newItem.category,
+        price: parseInt(newItem.price),
+        description: newItem.description,
+        available: true,
+        stock: parseInt(newItem.stock),
+        variants: newItem.variants ? newItem.variants.split(',').map(v => v.trim()) : [],
+        addOns: newItem.addOns ? newItem.addOns.split(',').map(a => a.trim()) : []
+      };
+      const created = await apiFetch('/menu', { method: 'POST', body: JSON.stringify(item) });
+      setMenuItems(prev => [...prev, created]);
+      await putItem('menu', created);
+      setNewItem({ name: "", category: "", price: "", description: "", stock: "10", variants: "", addOns: "" });
+      setShowAddDialog(false);
+      toast({
+        title: "Item Added",
+        description: `${created.name} has been added to the menu`,
+      });
+    } catch (e: any) {
+      toast({ title: "Error", description: e.message, variant: "destructive" });
+    }
+  };
 
-    const item = {
-      id: String(menuItems.length + 1),
-      name: newItem.name,
-      category: newItem.category,
-      price: parseInt(newItem.price),
-      description: newItem.description,
-      available: true,
-      stock: parseInt(newItem.stock),
-      variants: newItem.variants ? newItem.variants.split(',').map(v => v.trim()) : [],
-      addOns: newItem.addOns ? newItem.addOns.split(',').map(a => a.trim()) : []
+  const toggleAvailability = async (itemId: string) => {
+    const item = menuItems.find(i => i.id === itemId);
+    if (!item) return;
+    try {
+      const updated = await apiFetch(`/menu/${itemId}`, {
+        method: 'PUT',
+        body: JSON.stringify({ available: !item.available })
+      });
+      setMenuItems(prev => prev.map(i => i.id === itemId ? updated : i));
+      await putItem('menu', updated);
+    } catch (e: any) {
+      toast({ title: "Error", description: e.message, variant: "destructive" });
+    }
+  };
+
+  const deleteItem = async (itemId: string) => {
+    try {
+      await apiFetch(`/menu/${itemId}`, { method: 'DELETE' });
+      setMenuItems(prev => prev.filter(item => item.id !== itemId));
+      await idbDeleteItem('menu', itemId);
+      toast({
+        title: "Item Deleted",
+        description: "Menu item has been removed",
+      });
+    } catch (e: any) {
+      toast({ title: "Error", description: e.message, variant: "destructive" });
+    }
+  };
+
+  useEffect(() => {
+    const fetchMenu = async () => {
+      setLoading(true);
+      try {
+        let items = [];
+        try {
+          items = await apiFetch('/menu');
+        } catch {
+          // fallback to IndexedDB if offline
+          items = await getAll('menu');
+        }
+        setMenuItems(items);
+        // update IndexedDB cache
+        for (const item of items) await putItem('menu', item);
+      } finally {
+        setLoading(false);
+      }
     };
-
-    setMenuItems(prev => [...prev, item]);
-    setNewItem({ name: "", category: "", price: "", description: "", stock: "10", variants: "", addOns: "" });
-    setShowAddDialog(false);
-
-    toast({
-      title: "Item Added",
-      description: `${item.name} has been added to the menu`,
-    });
-  };
-
-  const toggleAvailability = (itemId: string) => {
-    setMenuItems(prev => prev.map(item => 
-      item.id === itemId ? { ...item, available: !item.available } : item
-    ));
-  };
-
-  const deleteItem = (itemId: string) => {
-    setMenuItems(prev => prev.filter(item => item.id !== itemId));
-    toast({
-      title: "Item Deleted",
-      description: "Menu item has been removed",
-    });
-  };
+    fetchMenu();
+  }, []);
 
   const filteredItems = menuItems.filter(item => {
     const matchesSearch = item.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -117,6 +124,8 @@ export function MenuManagement() {
     const matchesCategory = selectedCategory === "all" || item.category === selectedCategory;
     return matchesSearch && matchesCategory;
   });
+
+  if (loading) return <div className="p-8 text-center text-lg">Loading menu...</div>;
 
   return (
     <div className="space-y-6">

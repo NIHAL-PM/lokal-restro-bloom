@@ -144,7 +144,7 @@ class PrinterService {
 
   async printReceipt(receipt: Receipt): Promise<boolean> {
     if (!this.config.enabled) {
-      console.log('Printer disabled');
+      // ...removed debug log...
       return false;
     }
 
@@ -162,15 +162,15 @@ class PrinterService {
       });
 
       if (response.ok) {
-        console.log('Receipt printed successfully');
+        // ...removed debug log...
         return true;
       } else {
         throw new Error(`Printer responded with status: ${response.status}`);
       }
     } catch (error) {
-      console.error('Failed to print receipt:', error);
+      // ...removed debug log...
       // For demo purposes, we'll log the ESC/POS data
-      console.log('ESC/POS Data would be sent to printer:', this.formatESCPOS(receipt));
+      // ...removed debug log...
       return false;
     }
   }

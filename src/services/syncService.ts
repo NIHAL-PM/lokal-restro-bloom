@@ -57,7 +57,7 @@ class SyncService {
   private connect(): void {
     // Don't try to reconnect if we've exceeded max attempts
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      console.log('Max reconnection attempts reached, switching to local mode permanently');
+      // ...removed debug log...
       this.fallbackToLocalSync();
       return;
     }
@@ -69,7 +69,7 @@ class SyncService {
       this.ws = new WebSocket(wsUrl);
       
       this.ws.onopen = () => {
-        console.log('WebSocket connected successfully');
+        // ...removed debug log...
         this.isConnected = true;
         this.useWebSocket = true;
         this.reconnectAttempts = 0; // Reset on successful connection
@@ -83,12 +83,12 @@ class SyncService {
           const message: SyncMessage = JSON.parse(event.data);
           this.handleMessage(message);
         } catch (error) {
-          console.error('Failed to parse sync message:', error);
+          // ...removed debug log...
         }
       };
 
       this.ws.onclose = () => {
-        console.log('WebSocket connection closed');
+        // ...removed debug log...
         this.isConnected = false;
         this.reconnectAttempts++;
         
@@ -100,7 +100,7 @@ class SyncService {
       };
 
       this.ws.onerror = (error) => {
-        console.error('WebSocket error:', error);
+        // ...removed debug log...
         this.isConnected = false;
         this.reconnectAttempts++;
         
@@ -110,13 +110,13 @@ class SyncService {
       };
 
     } catch (error) {
-      console.error('Failed to connect WebSocket:', error);
+      // ...removed debug log...
       this.fallbackToLocalSync();
     }
   }
 
   private fallbackToLocalSync(): void {
-    console.log('Falling back to local storage sync');
+    // ...removed debug log...
     this.useWebSocket = false;
     this.isConnected = false;
     
@@ -137,7 +137,7 @@ class SyncService {
           this.notifyListeners(syncData);
         }
       } catch (error) {
-        console.error('Failed to parse storage sync data:', error);
+        // ...removed debug log...
       }
     }
   }
@@ -249,7 +249,7 @@ class SyncService {
     const delay = Math.min(10000 * Math.pow(2, this.reconnectAttempts), 60000);
     
     this.reconnectInterval = setTimeout(() => {
-      console.log(`Attempting to reconnect... (attempt ${this.reconnectAttempts + 1}/${this.maxReconnectAttempts})`);
+      // ...removed debug log...
       this.connect();
     }, delay);
   }
@@ -263,7 +263,7 @@ class SyncService {
       try {
         listener(data);
       } catch (error) {
-        console.error('Sync listener error:', error);
+        // ...removed debug log...
       }
     });
   }

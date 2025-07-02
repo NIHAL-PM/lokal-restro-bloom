@@ -242,7 +242,7 @@ class DatabaseService {
       const stored = localStorage.getItem(this.storageKey);
       return stored ? JSON.parse(stored) : null;
     } catch (error) {
-      console.error('Failed to load data from storage:', error);
+      // ...removed debug log...
       return null;
     }
   }
@@ -252,7 +252,7 @@ class DatabaseService {
       localStorage.setItem(this.storageKey, JSON.stringify(this.data));
       this.notifyListeners();
     } catch (error) {
-      console.error('Failed to save data to storage:', error);
+      // ...removed debug log...
     }
   }
 

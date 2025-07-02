@@ -32,12 +32,16 @@ import {
   Printer
 } from "lucide-react";
 import { databaseService } from "@/services/databaseService";
+import { getAll } from '@/services/indexedDb';
+import { apiFetch } from '@/services/api';
 import { useToast } from "@/hooks/use-toast";
 import type { DatabaseSchema, Order, Transaction } from "@/services/databaseService";
 
 export function Reports() {
   const { toast } = useToast();
   const [data, setData] = useState<DatabaseSchema>(databaseService.getData());
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [dateRange, setDateRange] = useState({
     from: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
     to: new Date().toISOString().split('T')[0]
@@ -45,26 +49,74 @@ export function Reports() {
   const [reportType, setReportType] = useState<'daily' | 'weekly' | 'monthly'>('daily');
 
   useEffect(() => {
-    const unsubscribe = databaseService.subscribe(setData);
-    return unsubscribe;
-  }, []);
+    async function fetchData() {
+      setLoading(true);
+      setError(null);
+      try {
+        // Try backend first
+        const [orders, transactions, menu, tables, rooms, settings] = await Promise.all([
+          apiFetch('/orders'),
+          apiFetch('/transactions'),
+          apiFetch('/menu'),
+          apiFetch('/tables'),
+          apiFetch('/rooms'),
+          apiFetch('/settings'),
+        ]);
+        setData((prev) => ({
+          ...prev,
+          orders,
+          transactions,
+          menuItems: menu,
+          tables,
+          rooms,
+          settings,
+        }));
+      } catch (err) {
+        // If backend fails, fallback to IndexedDB
+        try {
+          const [orders, transactions, menu, tables, rooms, settings] = await Promise.all([
+            getAll('orders'),
+            getAll('transactions'),
+            getAll('menu'),
+            getAll('tables'),
+            getAll('rooms'),
+            getAll('settings'),
+          ]);
+          setData((prev) => ({
+            ...prev,
+            orders,
+            transactions,
+            menuItems: menu,
+            tables,
+            rooms,
+            settings: settings[0] || prev.settings,
+          }));
+        } catch (e) {
+          setError('Failed to load report data.');
+        }
+      } finally {
+        setLoading(false);
+      }
+    }
+    fetchData();
+  }, [dateRange]);
 
   // Filter data based on date range
-  const filteredOrders = data.orders.filter(order => {
+  const filteredOrders = Array.isArray(data.orders) ? data.orders.filter(order => {
     const orderDate = new Date(order.timestamp);
     const fromDate = new Date(dateRange.from);
     const toDate = new Date(dateRange.to);
     toDate.setHours(23, 59, 59, 999); // Include full day
     return orderDate >= fromDate && orderDate <= toDate;
-  });
+  }) : [];
 
-  const filteredTransactions = data.transactions.filter(transaction => {
+  const filteredTransactions = Array.isArray(data.transactions) ? data.transactions.filter(transaction => {
     const transactionDate = new Date(transaction.timestamp);
     const fromDate = new Date(dateRange.from);
     const toDate = new Date(dateRange.to);
     toDate.setHours(23, 59, 59, 999);
     return transactionDate >= fromDate && transactionDate <= toDate;
-  });
+  }) : [];
 
   // Calculate metrics
   const totalRevenue = filteredOrders.reduce((sum, order) => sum + order.total, 0);
@@ -205,6 +257,12 @@ export function Reports() {
     });
   };
 
+  if (loading) {
+    return <div className="p-6 text-center text-lg">Loading reports...</div>;
+  }
+  if (error) {
+    return <div className="p-6 text-center text-red-600">{error}</div>;
+  }
   return (
     <div className="space-y-6 p-6">
       <div className="flex items-center justify-between">

@@ -32,7 +32,7 @@ const Index = () => {
     // Setup sync listeners
     const unsubscribeSync = syncService.onSync((syncData) => {
       // Handle incoming sync data
-      console.log('Received sync:', syncData);
+      // ...removed debug log...
       
       if (syncData.type === 'order' && syncData.action === 'create') {
         soundService.playNewOrderChime();

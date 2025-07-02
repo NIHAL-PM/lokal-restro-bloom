@@ -15,7 +15,7 @@ class SoundService {
       this.audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
       this.initialized = true;
     } catch (error) {
-      console.warn('Audio context not supported:', error);
+      // ...removed debug log...
       this.initialized = false;
     }
   }
@@ -23,7 +23,7 @@ class SoundService {
   private attachGlobalFunction() {
     window.playLokalSound = (type: string) => {
       if (!this.initialized) {
-        console.log('Sound service not initialized, skipping sound');
+        // ...removed debug log...
         return;
       }
       
@@ -67,17 +67,17 @@ class SoundService {
         if (settings) {
           this.enabled = settings.enableSounds !== false;
           this.volume = settings.soundVolume ? settings.soundVolume / 100 : 0.5;
-          console.log('Sound settings updated:', { enabled: this.enabled, volume: this.volume });
+          // ...removed debug log...
         }
       }
     } catch (error) {
-      console.warn('Failed to load sound settings:', error);
+      // ...removed debug log...
     }
   }
 
   private playTone(frequency: number, duration: number, type: OscillatorType = 'sine') {
     if (!this.enabled || !this.audioContext || !this.initialized) {
-      console.log('Sound disabled or audio context unavailable');
+      // ...removed debug log...
       return;
     }
 
@@ -102,15 +102,15 @@ class SoundService {
       oscillator.start(this.audioContext.currentTime);
       oscillator.stop(this.audioContext.currentTime + duration);
       
-      console.log('Playing tone:', { frequency, duration, enabled: this.enabled, volume: this.volume });
+      // ...removed debug log...
     } catch (error) {
-      console.warn('Failed to play sound:', error);
+      // ...removed debug log...
     }
   }
 
   private playSequence(notes: Array<{ frequency: number; duration: number; type?: OscillatorType }>) {
     if (!this.enabled || !this.initialized) {
-      console.log('Sound disabled or not initialized, skipping sequence');
+      // ...removed debug log...
       return;
     }
 
@@ -124,7 +124,7 @@ class SoundService {
   }
 
   playNewOrderChime() {
-    console.log('Playing new order chime');
+    // ...removed debug log...
     this.playSequence([
       { frequency: 523.25, duration: 0.2 },
       { frequency: 659.25, duration: 0.2 },
@@ -133,7 +133,7 @@ class SoundService {
   }
 
   playOrderReadyChime() {
-    console.log('Playing order ready chime');
+    // ...removed debug log...
     this.playSequence([
       { frequency: 880, duration: 0.3 },
       { frequency: 880, duration: 0.3 }
@@ -141,7 +141,7 @@ class SoundService {
   }
 
   playBillPrintChime() {
-    console.log('Playing bill print chime');
+    // ...removed debug log...
     this.playSequence([
       { frequency: 1046.50, duration: 0.15 },
       { frequency: 1318.51, duration: 0.15 }
@@ -149,7 +149,7 @@ class SoundService {
   }
 
   playCheckinChime() {
-    console.log('Playing checkin chime');
+    // ...removed debug log...
     this.playSequence([
       { frequency: 659.25, duration: 0.2 },
       { frequency: 783.99, duration: 0.2 },
@@ -158,7 +158,7 @@ class SoundService {
   }
 
   playCheckoutChime() {
-    console.log('Playing checkout chime');
+    // ...removed debug log...
     this.playSequence([
       { frequency: 1046.50, duration: 0.2 },
       { frequency: 783.99, duration: 0.2 },
@@ -167,12 +167,12 @@ class SoundService {
   }
 
   playErrorSound() {
-    console.log('Playing error sound');
+    // ...removed debug log...
     this.playTone(200, 0.5, 'sawtooth');
   }
 
   playSuccessSound() {
-    console.log('Playing success sound');
+    // ...removed debug log...
     this.playSequence([
       { frequency: 523.25, duration: 0.1 },
       { frequency: 659.25, duration: 0.1 },
@@ -181,18 +181,18 @@ class SoundService {
   }
 
   playTestSound() {
-    console.log('Playing test sound');
+    // ...removed debug log...
     this.playNewOrderChime();
   }
 
   setEnabled(enabled: boolean) {
     this.enabled = enabled;
-    console.log('Sound enabled set to:', enabled);
+    // ...removed debug log...
   }
 
   setVolume(volume: number) {
     this.volume = Math.max(0, Math.min(1, volume / 100));
-    console.log('Sound volume set to:', this.volume);
+    // ...removed debug log...
   }
 
   playSound(type: 'new-order' | 'ready' | 'billing' | 'checkin' | 'checkout' | 'error' | 'success' | 'test') {

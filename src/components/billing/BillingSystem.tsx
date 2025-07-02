@@ -12,6 +12,8 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Receipt, CreditCard, Banknote, Smartphone, Printer, Calculator, Clock } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { databaseService } from "@/services/databaseService";
+import { createTransactionAPI, updateTransactionAPI, updateTableAPI, updateRoomAPI } from '@/services/api';
+import { putItem, getAll } from '@/services/indexedDb';
 import { syncService } from "@/services/syncService";
 import { soundService } from "@/services/soundService";
 import { printerService } from "@/services/printerService";
@@ -75,26 +77,36 @@ export function BillingSystem() {
         cashierId: 'current-user' // Should be actual user ID
       };
 
-      const newTransaction = databaseService.createTransaction(transaction);
+      // 1. Create transaction in backend
+      const newTransaction = await createTransactionAPI(transaction);
+      // 2. Store transaction in IndexedDB
+      await putItem('transactions', newTransaction);
 
-      // Update order status
-      databaseService.updateOrder(currentBill.id, { status: 'served' });
+      // 3. Update order status in backend
+      await updateTransactionAPI(currentBill.id, { status: 'served' });
+      // 4. Optionally update in IndexedDB (if offline-first)
+      await putItem('orders', { ...currentBill, status: 'served' });
 
-      // Update table/room status if applicable
+      // 5. Update table/room status if applicable (backend and IndexedDB)
       if (currentBill.tableId) {
-        databaseService.updateTable(currentBill.tableId, { 
-          status: 'free',
-          currentOrderId: undefined,
-          occupiedSince: undefined
-        });
+        // Backend: update table status
+        await updateTableAPI(currentBill.tableId, { status: 'free', currentOrderId: undefined, occupiedSince: undefined });
+        // IndexedDB:
+        await putItem('tables', { id: currentBill.tableId, status: 'free', currentOrderId: undefined, occupiedSince: undefined });
       }
-      
       if (currentBill.roomId) {
-        const data = databaseService.getData();
-        const room = data.rooms.find(r => r.id === currentBill.roomId);
+        // Backend: update room orderIds
+        // Fetch current room from IndexedDB (or backend if needed)
+        // For now, just clear the order from the room's orderIds
+        // You may want to fetch the room from backend for real implementation
+        // Here, we assume the room is available in IndexedDB
+        // Get all rooms from IndexedDB, update, and put back
+        const allRooms = await getAll('rooms');
+        const room = allRooms.find((r: any) => r.id === currentBill.roomId);
         if (room) {
-          const updatedOrderIds = room.orderIds.filter(id => id !== currentBill.id);
-          databaseService.updateRoom(currentBill.roomId, { orderIds: updatedOrderIds });
+          const updatedOrderIds = (room.orderIds || []).filter((id: string) => id !== currentBill.id);
+          await updateRoomAPI(currentBill.roomId, { orderIds: updatedOrderIds });
+          await putItem('rooms', { ...room, orderIds: updatedOrderIds });
         }
       }
 
@@ -102,8 +114,8 @@ export function BillingSystem() {
       syncService.broadcast({
         type: 'payment',
         action: 'complete',
-        data: { 
-          orderId: currentBill.id, 
+        data: {
+          orderId: currentBill.id,
           transaction: newTransaction,
           tableId: currentBill.tableId,
           roomId: currentBill.roomId
@@ -149,10 +161,7 @@ export function BillingSystem() {
       };
 
       const printSuccess = await printerService.printReceipt(receipt);
-      
-      // Play billing sound
       soundService.playBillPrintChime();
-
       toast({
         title: "Payment Processed",
         description: `Order ${currentBill.id} has been paid and ${printSuccess ? 'receipt printed' : 'receipt queued for printing'}`,
@@ -165,7 +174,6 @@ export function BillingSystem() {
       setShowPaymentDialog(false);
 
     } catch (error) {
-      console.error('Payment processing error:', error);
       toast({
         title: "Payment Error",
         description: "Failed to process payment. Please try again.",

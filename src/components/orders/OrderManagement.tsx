@@ -1,4 +1,3 @@
-
 import { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -33,22 +32,16 @@ export function OrderManagement() {
     notes: ''
   });
   const [selectedItems, setSelectedItems] = useState<OrderItem[]>([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    setLoading(true);
     const data = databaseService.getData();
     setOrders(data.orders);
     setMenuItems(data.menuItems);
     setTables(data.tables);
     setRooms(data.rooms);
-
-    const unsubscribe = databaseService.subscribe((data) => {
-      setOrders(data.orders);
-      setMenuItems(data.menuItems);
-      setTables(data.tables);
-      setRooms(data.rooms);
-    });
-
-    return unsubscribe;
+    setLoading(false);
   }, []);
 
   const addItemToOrder = (menuItem: MenuItem) => {
@@ -279,6 +272,7 @@ export function OrderManagement() {
     setShowCreateDialog(false);
   };
 
+  if (loading) return <div className="p-8 text-center text-lg">Loading orders...</div>;
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">

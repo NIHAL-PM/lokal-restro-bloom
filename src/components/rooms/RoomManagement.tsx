@@ -1,5 +1,5 @@
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -9,36 +9,32 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Bed, Plus, User, Phone, Calendar, IndianRupee } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { apiFetch } from "@/services/api";
+import { getAll, putItem } from "@/services/indexedDb";
 
 export function RoomManagement() {
   const { toast } = useToast();
   
-  const [rooms, setRooms] = useState([
-    {
-      id: "R101",
-      type: "Standard",
-      price: 2500,
-      status: "occupied",
-      guest: { name: "John Doe", phone: "9876543210", checkIn: "2024-01-15", guests: 2 },
-      orders: [{ id: "ORD-002", amount: 520 }]
-    },
-    {
-      id: "R102",
-      type: "Deluxe",
-      price: 3500,
-      status: "vacant",
-      guest: null,
-      orders: []
-    },
-    {
-      id: "R103",
-      type: "Suite",
-      price: 5000,
-      status: "cleaning",
-      guest: null,
-      orders: []
-    }
-  ]);
+  const [rooms, setRooms] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    const fetchRooms = async () => {
+      setLoading(true);
+      try {
+        let items = [];
+        try {
+          items = await apiFetch('/rooms');
+        } catch {
+          items = await getAll('rooms');
+        }
+        setRooms(items);
+        for (const item of items) await putItem('rooms', item);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchRooms();
+  }, []);
 
   const [showCheckInDialog, setShowCheckInDialog] = useState(false);
   const [selectedRoom, setSelectedRoom] = useState<string | null>(null);
@@ -49,7 +45,7 @@ export function RoomManagement() {
     checkIn: new Date().toISOString().split('T')[0]
   });
 
-  const handleCheckIn = () => {
+  const handleCheckIn = async () => {
     if (!selectedRoom || !checkInData.name || !checkInData.phone) {
       toast({
         title: "Incomplete Information",
@@ -58,58 +54,48 @@ export function RoomManagement() {
       });
       return;
     }
-
-    setRooms(prev => prev.map(room => 
-      room.id === selectedRoom 
-        ? { 
-            ...room, 
-            status: "occupied", 
-            guest: { 
-              ...checkInData, 
-              guests: parseInt(checkInData.guests) 
-            } 
-          }
-        : room
-    ));
-
-    // Play check-in sound
-    if (window.playLokalSound) {
-      window.playLokalSound("ready");
+    try {
+      const updated = await apiFetch(`/rooms/${selectedRoom}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          status: 'occupied',
+          guest: { ...checkInData, guests: parseInt(checkInData.guests) }
+        })
+      });
+      setRooms(prev => prev.map(room => room.id === selectedRoom ? updated : room));
+      await putItem('rooms', updated);
+      toast({
+        title: "Guest Checked In",
+        description: `${checkInData.name} checked into room ${selectedRoom}`,
+      });
+      setShowCheckInDialog(false);
+      setSelectedRoom(null);
+      setCheckInData({ name: "", phone: "", guests: "1", checkIn: new Date().toISOString().split('T')[0] });
+    } catch (e: any) {
+      toast({ title: "Error", description: e.message, variant: "destructive" });
     }
-
-    toast({
-      title: "Guest Checked In",
-      description: `${checkInData.name} checked into room ${selectedRoom}`,
-    });
-
-    setShowCheckInDialog(false);
-    setSelectedRoom(null);
-    setCheckInData({ name: "", phone: "", guests: "1", checkIn: new Date().toISOString().split('T')[0] });
   };
 
-  const handleCheckOut = (roomId: string) => {
+  const handleCheckOut = async (roomId: string) => {
     const room = rooms.find(r => r.id === roomId);
     if (!room || !room.guest) return;
-
     const roomCharges = room.price;
     const orderCharges = room.orders.reduce((sum, order) => sum + order.amount, 0);
     const totalAmount = roomCharges + orderCharges;
-
-    setRooms(prev => prev.map(r => 
-      r.id === roomId 
-        ? { ...r, status: "vacant", guest: null, orders: [] }
-        : r
-    ));
-
-    // Play check-out sound
-    if (window.playLokalSound) {
-      window.playLokalSound("ready");
+    try {
+      const updated = await apiFetch(`/rooms/${roomId}`, {
+        method: 'PUT',
+        body: JSON.stringify({ status: 'vacant', guest: null, orders: [] })
+      });
+      setRooms(prev => prev.map(r => r.id === roomId ? updated : r));
+      await putItem('rooms', updated);
+      toast({
+        title: "Guest Checked Out",
+        description: `Total bill: ₹${totalAmount} (Room: ₹${roomCharges} + Orders: ₹${orderCharges})`,
+      });
+    } catch (e: any) {
+      toast({ title: "Error", description: e.message, variant: "destructive" });
     }
-
-    toast({
-      title: "Guest Checked Out",
-      description: `Total bill: ₹${totalAmount} (Room: ₹${roomCharges} + Orders: ₹${orderCharges})`,
-    });
   };
 
   const getStatusColor = (status: string) => {
@@ -123,6 +109,7 @@ export function RoomManagement() {
     }
   };
 
+  if (loading) return <div className="p-8 text-center text-lg">Loading rooms...</div>;
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">

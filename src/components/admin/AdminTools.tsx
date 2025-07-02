@@ -26,6 +26,9 @@ import {
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { databaseService } from "@/services/databaseService";
+import { exportBackupAPI, importBackupAPI } from '@/services/api';
+import { getUsersAPI, createUserAPI, updateUserAPI, deleteUserAPI } from '@/services/api';
+import { getAll, putItem, deleteItem } from '@/services/indexedDb';
 import { syncService } from "@/services/syncService";
 import { soundService } from "@/services/soundService";
 import type { User, DatabaseSchema } from "@/services/databaseService";
@@ -33,6 +36,8 @@ import type { User, DatabaseSchema } from "@/services/databaseService";
 export function AdminTools() {
   const { toast } = useToast();
   const [data, setData] = useState<DatabaseSchema>(databaseService.getData());
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [showAddUserDialog, setShowAddUserDialog] = useState(false);
   const [showBackupDialog, setShowBackupDialog] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
@@ -47,20 +52,38 @@ export function AdminTools() {
   const [connectedDevices, setConnectedDevices] = useState(syncService.getConnectedDevices());
 
   useEffect(() => {
-    const unsubscribeDb = databaseService.subscribe(setData);
-    
+    async function fetchUsers() {
+      setLoading(true);
+      setError(null);
+      try {
+        // Try backend first
+        const users = await getUsersAPI();
+        setData(prev => ({ ...prev, users }));
+      } catch (err) {
+        // Fallback to IndexedDB
+        try {
+          const users = await getAll('users');
+          setData(prev => ({ ...prev, users }));
+        } catch (e) {
+          setError('Failed to load users.');
+        }
+      } finally {
+        setLoading(false);
+      }
+    }
+    fetchUsers();
+
     const statusInterval = setInterval(() => {
       setSyncStatus(syncService.getSyncStatus());
       setConnectedDevices(syncService.getConnectedDevices());
     }, 5000);
 
     return () => {
-      unsubscribeDb();
       clearInterval(statusInterval);
     };
   }, []);
 
-  const handleAddUser = () => {
+  const handleAddUser = async () => {
     if (!newUser.name || !newUser.pin) {
       toast({
         title: "Incomplete Information",
@@ -81,38 +104,37 @@ export function AdminTools() {
       return;
     }
 
-    const user: User = {
-      id: `USER-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+    const user: Omit<User, 'id'> = {
       name: newUser.name,
       role: newUser.role,
       pin: newUser.pin,
       active: newUser.active
     };
 
-    const updatedUsers = [...data.users, user];
-    databaseService.updateData({ users: updatedUsers });
-
-    // Sync user addition across devices
-    syncService.broadcast({
-      type: 'user',
-      action: 'create',
-      data: user,
-      timestamp: Date.now(),
-      deviceId: syncService.getDeviceId()
-    });
-
-    setNewUser({ name: "", role: "waiter", pin: "", active: true });
-    setShowAddUserDialog(false);
-
-    toast({
-      title: "User Added",
-      description: `${user.name} has been added as ${user.role}`,
-    });
-
-    soundService.playSound('success');
+    try {
+      // Backend
+      const created = await createUserAPI(user);
+      // IndexedDB
+      await putItem('users', created);
+      setData(prev => ({ ...prev, users: [...prev.users, created] }));
+      setNewUser({ name: "", role: "waiter", pin: "", active: true });
+      setShowAddUserDialog(false);
+      toast({
+        title: "User Added",
+        description: `${created.name} has been added as ${created.role}`,
+      });
+      soundService.playSound('success');
+    } catch (e) {
+      toast({
+        title: "User Add Failed",
+        description: "Could not add user. Please try again.",
+        variant: "destructive"
+      });
+      soundService.playSound('error');
+    }
   };
 
-  const handleEditUser = (user: User) => {
+  const handleEditUser = async (user: User) => {
     if (!user.name || !user.pin) {
       toast({
         title: "Incomplete Information",
@@ -133,78 +155,95 @@ export function AdminTools() {
       return;
     }
 
-    const updatedUsers = data.users.map(u => u.id === user.id ? user : u);
-    databaseService.updateData({ users: updatedUsers });
-
-    // Sync user update across devices
-    syncService.broadcast({
-      type: 'user',
-      action: 'update',
-      data: user,
-      timestamp: Date.now(),
-      deviceId: syncService.getDeviceId()
-    });
-
-    setEditingUser(null);
-
-    toast({
-      title: "User Updated",
-      description: `${user.name} has been updated`,
-    });
-
-    soundService.playSound('success');
-  };
-
-  const handleDeleteUser = (userId: string) => {
-    const user = data.users.find(u => u.id === userId);
-    const updatedUsers = data.users.filter(u => u.id !== userId);
-    databaseService.updateData({ users: updatedUsers });
-
-    // Sync user deletion across devices
-    syncService.broadcast({
-      type: 'user',
-      action: 'delete',
-      data: { id: userId },
-      timestamp: Date.now(),
-      deviceId: syncService.getDeviceId()
-    });
-
-    toast({
-      title: "User Deleted",
-      description: `${user?.name} has been removed`,
-    });
-
-    soundService.playSound('success');
-  };
-
-  const exportBackup = () => {
     try {
-      const backupData = databaseService.exportData();
-      const blob = new Blob([backupData], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `lokalrestro-backup-${new Date().toISOString().split('T')[0]}.json`;
-      link.click();
-      URL.revokeObjectURL(url);
-
+      // Backend
+      await updateUserAPI(user.id, user);
+      // IndexedDB
+      await putItem('users', user);
+      setData(prev => ({ ...prev, users: prev.users.map(u => u.id === user.id ? user : u) }));
+      setEditingUser(null);
       toast({
-        title: "Backup Created",
-        description: "Database backup has been downloaded",
+        title: "User Updated",
+        description: `${user.name} has been updated`,
       });
-
       soundService.playSound('success');
-    } catch (error) {
+    } catch (e) {
       toast({
-        title: "Backup Failed",
-        description: "Failed to create backup",
+        title: "User Update Failed",
+        description: "Could not update user. Please try again.",
         variant: "destructive"
       });
       soundService.playSound('error');
     }
   };
 
-  const importBackup = () => {
+  const handleDeleteUser = async (userId: string) => {
+    const user = data.users.find(u => u.id === userId);
+    try {
+      // Backend
+      await deleteUserAPI(userId);
+      // IndexedDB
+      await deleteItem('users', userId);
+      setData(prev => ({ ...prev, users: prev.users.filter(u => u.id !== userId) }));
+      toast({
+        title: "User Deleted",
+        description: `${user?.name} has been removed`,
+      });
+      soundService.playSound('success');
+    } catch (e) {
+      toast({
+        title: "User Delete Failed",
+        description: "Could not delete user. Please try again.",
+        variant: "destructive"
+      });
+      soundService.playSound('error');
+    }
+  };
+
+  const exportBackup = async () => {
+    try {
+      // Try backend first
+      const backupData = await exportBackupAPI();
+      const blob = new Blob([JSON.stringify(backupData, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `lokalrestro-backup-${new Date().toISOString().split('T')[0]}.json`;
+      link.click();
+      URL.revokeObjectURL(url);
+      toast({
+        title: "Backup Created",
+        description: "Database backup has been downloaded",
+      });
+      soundService.playSound('success');
+    } catch (error) {
+      // Fallback to local export
+      try {
+        const backupData = databaseService.exportData();
+        const blob = new Blob([backupData], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `lokalrestro-backup-${new Date().toISOString().split('T')[0]}.json`;
+        link.click();
+        URL.revokeObjectURL(url);
+        toast({
+          title: "Backup Created (Local)",
+          description: "Database backup has been downloaded from local storage",
+        });
+        soundService.playSound('success');
+      } catch (e) {
+        toast({
+          title: "Backup Failed",
+          description: "Failed to create backup",
+          variant: "destructive"
+        });
+        soundService.playSound('error');
+      }
+    }
+  };
+
+  const importBackup = async () => {
     if (!backupData.trim()) {
       toast({
         title: "No Data",
@@ -215,11 +254,10 @@ export function AdminTools() {
     }
 
     try {
-      databaseService.importData(backupData);
+      // Try backend first
+      await importBackupAPI(backupData);
       setBackupData("");
       setShowBackupDialog(false);
-
-      // Sync full data restore across devices
       syncService.broadcast({
         type: 'system',
         action: 'restore',
@@ -227,20 +265,37 @@ export function AdminTools() {
         timestamp: Date.now(),
         deviceId: syncService.getDeviceId()
       });
-
       toast({
         title: "Backup Restored",
         description: "Database has been restored successfully",
       });
-
       soundService.playSound('success');
     } catch (error) {
-      toast({
-        title: "Restore Failed",
-        description: "Failed to restore backup: " + (error as Error).message,
-        variant: "destructive"
-      });
-      soundService.playSound('error');
+      // Fallback to local import
+      try {
+        databaseService.importData(backupData);
+        setBackupData("");
+        setShowBackupDialog(false);
+        syncService.broadcast({
+          type: 'system',
+          action: 'restore',
+          data: { timestamp: Date.now() },
+          timestamp: Date.now(),
+          deviceId: syncService.getDeviceId()
+        });
+        toast({
+          title: "Backup Restored (Local)",
+          description: "Database has been restored from local storage",
+        });
+        soundService.playSound('success');
+      } catch (e) {
+        toast({
+          title: "Restore Failed",
+          description: "Failed to restore backup: " + (e as Error).message,
+          variant: "destructive"
+        });
+        soundService.playSound('error');
+      }
     }
   };
 

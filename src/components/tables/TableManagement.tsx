@@ -7,37 +7,44 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Table, Users, Plus, Edit, Trash2, Clock } from "lucide-react";
+import { Table as TableIcon, Users, Plus, Edit, Trash2, Clock } from "lucide-react";
+import type { Table } from '@/services/databaseService';
 import { useToast } from "@/hooks/use-toast";
-import { databaseService } from "@/services/databaseService";
-import { syncService } from "@/services/syncService";
-import type { Table as TableType, Order } from "@/services/databaseService";
+import { apiFetch } from "@/services/api";
+import { getAll, putItem, deleteItem as idbDeleteItem } from "@/services/indexedDb";
 
 export function TableManagement() {
   const { toast } = useToast();
-  const [tables, setTables] = useState<TableType[]>([]);
-  const [orders, setOrders] = useState<Order[]>([]);
+  const [tables, setTables] = useState<any[]>([]);
+  const [orders, setOrders] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
   const [showAddDialog, setShowAddDialog] = useState(false);
-  const [editingTable, setEditingTable] = useState<TableType | null>(null);
+  const [editingTable, setEditingTable] = useState<Table | null>(null);
   const [newTable, setNewTable] = useState({
     number: "",
     capacity: "2"
   });
 
   useEffect(() => {
-    const data = databaseService.getData();
-    setTables(data.tables);
-    setOrders(data.orders);
-
-    const unsubscribe = databaseService.subscribe((data) => {
-      setTables(data.tables);
-      setOrders(data.orders);
-    });
-
-    return unsubscribe;
+    const fetchTables = async () => {
+      setLoading(true);
+      try {
+        let items = [];
+        try {
+          items = await apiFetch('/tables');
+        } catch {
+          items = await getAll('tables');
+        }
+        setTables(items);
+        for (const item of items) await putItem('tables', item);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchTables();
   }, []);
 
-  const handleAddTable = () => {
+  const handleAddTable = async () => {
     if (!newTable.number) {
       toast({
         title: "Error",
@@ -46,73 +53,61 @@ export function TableManagement() {
       });
       return;
     }
-
-    const tableData = {
-      id: `T${newTable.number}`,
-      number: newTable.number,
-      capacity: parseInt(newTable.capacity),
-      status: 'free' as const
-    };
-
-    const updatedTables = [...tables, tableData];
-    databaseService.updateData({ tables: updatedTables });
-
-    syncService.broadcast({
-      type: 'table',
-      action: 'create',
-      data: tableData,
-      timestamp: Date.now(),
-      deviceId: syncService.getDeviceId()
-    });
-
-    setNewTable({ number: "", capacity: "2" });
-    setShowAddDialog(false);
-
-    toast({
-      title: "Table Added",
-      description: `Table ${newTable.number} has been added successfully`,
-    });
+    try {
+      const tableData = {
+        number: newTable.number,
+        capacity: parseInt(newTable.capacity),
+        status: 'free'
+      };
+      const created = await apiFetch('/tables', { method: 'POST', body: JSON.stringify(tableData) });
+      setTables(prev => [...prev, created]);
+      await putItem('tables', created);
+      setNewTable({ number: "", capacity: "2" });
+      setShowAddDialog(false);
+      toast({
+        title: "Table Added",
+        description: `Table ${created.number} has been added successfully`,
+      });
+    } catch (e: any) {
+      toast({ title: "Error", description: e.message, variant: "destructive" });
+    }
   };
 
-  const handleEditTable = (table: TableType) => {
+  const handleEditTable = (table: any) => {
     setEditingTable(table);
     setNewTable({ number: table.number, capacity: table.capacity.toString() });
     setShowAddDialog(true);
   };
 
-  const handleUpdateTable = () => {
+  const handleUpdateTable = async () => {
     if (!editingTable || !newTable.number) return;
-
-    const updatedTable = {
-      ...editingTable,
-      number: newTable.number,
-      capacity: parseInt(newTable.capacity)
-    };
-
-    databaseService.updateTable(editingTable.id, updatedTable);
-
-    syncService.broadcast({
-      type: 'table',
-      action: 'update',
-      data: updatedTable,
-      timestamp: Date.now(),
-      deviceId: syncService.getDeviceId()
-    });
-
-    setEditingTable(null);
-    setNewTable({ number: "", capacity: "2" });
-    setShowAddDialog(false);
-
-    toast({
-      title: "Table Updated",
-      description: `Table ${newTable.number} has been updated successfully`,
-    });
+    try {
+      const updatedTable = {
+        ...editingTable,
+        number: newTable.number,
+        capacity: parseInt(newTable.capacity)
+      };
+      const updated = await apiFetch(`/tables/${editingTable.id}`, {
+        method: 'PUT',
+        body: JSON.stringify(updatedTable)
+      });
+      setTables(prev => prev.map(t => t.id === editingTable.id ? updated : t));
+      await putItem('tables', updated);
+      setEditingTable(null);
+      setNewTable({ number: "", capacity: "2" });
+      setShowAddDialog(false);
+      toast({
+        title: "Table Updated",
+        description: `Table ${updated.number} has been updated successfully`,
+      });
+    } catch (e: any) {
+      toast({ title: "Error", description: e.message, variant: "destructive" });
+    }
   };
 
-  const handleDeleteTable = (tableId: string) => {
+  const handleDeleteTable = async (tableId: string) => {
     const table = tables.find(t => t.id === tableId);
     if (!table) return;
-
     if (table.status !== 'free') {
       toast({
         title: "Cannot Delete",
@@ -121,34 +116,30 @@ export function TableManagement() {
       });
       return;
     }
-
-    const updatedTables = tables.filter(t => t.id !== tableId);
-    databaseService.updateData({ tables: updatedTables });
-
-    syncService.broadcast({
-      type: 'table',
-      action: 'delete',
-      data: { id: tableId },
-      timestamp: Date.now(),
-      deviceId: syncService.getDeviceId()
-    });
-
-    toast({
-      title: "Table Deleted",
-      description: `Table ${table.number} has been deleted`,
-    });
+    try {
+      await apiFetch(`/tables/${tableId}`, { method: 'DELETE' });
+      setTables(prev => prev.filter(t => t.id !== tableId));
+      await idbDeleteItem('tables', tableId);
+      toast({
+        title: "Table Deleted",
+        description: `Table ${table.number} has been deleted`,
+      });
+    } catch (e: any) {
+      toast({ title: "Error", description: e.message, variant: "destructive" });
+    }
   };
 
-  const updateTableStatus = (tableId: string, status: TableType['status']) => {
-    databaseService.updateTable(tableId, { status });
-
-    syncService.broadcast({
-      type: 'table',
-      action: 'status_update',
-      data: { id: tableId, status },
-      timestamp: Date.now(),
-      deviceId: syncService.getDeviceId()
-    });
+  const updateTableStatus = async (tableId: string, status: string) => {
+    try {
+      const updated = await apiFetch(`/tables/${tableId}`, {
+        method: 'PUT',
+        body: JSON.stringify({ status })
+      });
+      setTables(prev => prev.map(t => t.id === tableId ? updated : t));
+      await putItem('tables', updated);
+    } catch (e: any) {
+      toast({ title: "Error", description: e.message, variant: "destructive" });
+    }
   };
 
   const getStatusColor = (status: string) => {
@@ -170,6 +161,8 @@ export function TableManagement() {
     setNewTable({ number: "", capacity: "2" });
     setShowAddDialog(false);
   };
+
+  if (loading) return <div className="p-8 text-center text-lg">Loading tables...</div>;
 
   return (
     <div className="space-y-6">
@@ -245,7 +238,7 @@ export function TableManagement() {
                   {tables.filter(t => t.status === 'free').length}
                 </p>
               </div>
-              <Table className="h-8 w-8 text-green-600 dark:text-green-400" />
+              <TableIcon className="h-8 w-8 text-green-600 dark:text-green-400" />
             </div>
           </CardContent>
         </Card>
@@ -287,7 +280,7 @@ export function TableManagement() {
                   {tables.filter(t => t.status === 'reserved').length}
                 </p>
               </div>
-              <Table className="h-8 w-8 text-purple-600 dark:text-purple-400" />
+              <TableIcon className="h-8 w-8 text-purple-600 dark:text-purple-400" />
             </div>
           </CardContent>
         </Card>
@@ -302,7 +295,7 @@ export function TableManagement() {
               <CardHeader>
                 <div className="flex items-center justify-between">
                   <CardTitle className="flex items-center">
-                    <Table className="h-5 w-5 mr-2 text-blue-600 dark:text-blue-400" />
+                    <TableIcon className="h-5 w-5 mr-2 text-blue-600 dark:text-blue-400" />
                     Table {table.number}
                   </CardTitle>
                   <Badge className={getStatusColor(table.status)}>
@@ -393,7 +386,7 @@ export function TableManagement() {
       {tables.length === 0 && (
         <Card className="border-0 shadow-lg dark:bg-gray-800">
           <CardContent className="flex flex-col items-center justify-center py-12">
-            <Table className="h-12 w-12 text-gray-400 mb-4" />
+            <TableIcon className="h-12 w-12 text-gray-400 mb-4" />
             <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-2">No tables found</h3>
             <p className="text-gray-500 dark:text-gray-400 text-center">
               Add your first table to start managing seating
