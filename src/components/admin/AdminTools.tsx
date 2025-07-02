@@ -2,434 +2,756 @@
 import { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Textarea } from "@/components/ui/textarea";
 import { 
-  Server, 
-  Printer, 
+  Plus, 
+  Edit, 
+  Trash2, 
+  Users, 
+  Database, 
   Download, 
-  Upload, 
-  MonitorCheck,
-  Wifi,
+  Upload,
   RefreshCw,
-  AlertTriangle,
-  CheckCircle,
-  Clock,
+  Settings,
+  Shield,
+  Activity,
   HardDrive
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { syncService, ConnectedDevice } from "@/services/syncService";
-import { printerService } from "@/services/printerService";
-import { backupService, BackupData } from "@/services/backupService";
 import { databaseService } from "@/services/databaseService";
+import { syncService } from "@/services/syncService";
+import { soundService } from "@/services/soundService";
+import type { User, DatabaseSchema } from "@/services/databaseService";
 
 export function AdminTools() {
   const { toast } = useToast();
-  const [connectedDevices, setConnectedDevices] = useState<ConnectedDevice[]>([]);
-  const [syncLogs, setSyncLogs] = useState<any[]>([]);
+  const [data, setData] = useState<DatabaseSchema>(databaseService.getData());
+  const [showAddUserDialog, setShowAddUserDialog] = useState(false);
   const [showBackupDialog, setShowBackupDialog] = useState(false);
-  const [showRestoreDialog, setShowRestoreDialog] = useState(false);
-  const [pendingRestore, setPendingRestore] = useState<BackupData | null>(null);
-  const [systemStats, setSystemStats] = useState({
-    totalOrders: 0,
-    totalRevenue: 0,
-    activeDevices: 0,
-    uptime: '0h 0m'
+  const [editingUser, setEditingUser] = useState<User | null>(null);
+  const [newUser, setNewUser] = useState({
+    name: "",
+    role: "waiter" as User['role'],
+    pin: "",
+    active: true
   });
+  const [backupData, setBackupData] = useState("");
+  const [syncStatus, setSyncStatus] = useState(syncService.getSyncStatus());
+  const [connectedDevices, setConnectedDevices] = useState(syncService.getConnectedDevices());
 
   useEffect(() => {
-    const updateDevices = () => {
+    const unsubscribeDb = databaseService.subscribe(setData);
+    
+    const statusInterval = setInterval(() => {
+      setSyncStatus(syncService.getSyncStatus());
       setConnectedDevices(syncService.getConnectedDevices());
-    };
-
-    const updateStats = () => {
-      const data = databaseService.getData();
-      const totalRevenue = data.transactions.reduce((sum, txn) => sum + txn.amount, 0);
-      
-      setSystemStats({
-        totalOrders: data.orders.length,
-        totalRevenue,
-        activeDevices: connectedDevices.length,
-        uptime: getUptime()
-      });
-    };
-
-    const updateLogs = () => {
-      const data = databaseService.getData();
-      setSyncLogs(data.syncLog.slice(-50).reverse());
-    };
-
-    const interval = setInterval(() => {
-      updateDevices();
-      updateStats();
-      updateLogs();
     }, 5000);
 
-    updateDevices();
-    updateStats();
-    updateLogs();
-
-    return () => clearInterval(interval);
-  }, [connectedDevices.length]);
-
-  useEffect(() => {
-    const pending = backupService.getPendingRestore();
-    setPendingRestore(pending);
+    return () => {
+      unsubscribeDb();
+      clearInterval(statusInterval);
+    };
   }, []);
 
-  const getUptime = () => {
-    const startTime = localStorage.getItem('lokal_start_time');
-    if (!startTime) {
-      localStorage.setItem('lokal_start_time', Date.now().toString());
-      return '0h 0m';
+  const handleAddUser = () => {
+    if (!newUser.name || !newUser.pin) {
+      toast({
+        title: "Incomplete Information",
+        description: "Please fill all required fields",
+        variant: "destructive"
+      });
+      return;
     }
-    
-    const uptime = Date.now() - parseInt(startTime);
-    const hours = Math.floor(uptime / (1000 * 60 * 60));
-    const minutes = Math.floor((uptime % (1000 * 60 * 60)) / (1000 * 60));
-    return `${hours}h ${minutes}m`;
-  };
 
-  const handleTestPrinter = async () => {
-    const success = await printerService.testPrinter();
-    
-    toast({
-      title: success ? "Printer Test Successful" : "Printer Test Failed",
-      description: success 
-        ? "Test receipt sent to printer successfully" 
-        : "Failed to connect to printer. Check configuration.",
-      variant: success ? "default" : "destructive"
+    // Check if PIN already exists
+    const existingUser = data.users.find(u => u.pin === newUser.pin);
+    if (existingUser) {
+      toast({
+        title: "PIN Already Exists",
+        description: "Please choose a different PIN",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    const user: User = {
+      id: `USER-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      name: newUser.name,
+      role: newUser.role,
+      pin: newUser.pin,
+      active: newUser.active
+    };
+
+    const updatedUsers = [...data.users, user];
+    databaseService.updateData({ users: updatedUsers });
+
+    // Sync user addition across devices
+    syncService.broadcast({
+      type: 'user',
+      action: 'create',
+      data: user,
+      timestamp: Date.now(),
+      deviceId: syncService.getDeviceId()
     });
-  };
 
-  const handlePingAllDevices = async () => {
-    await syncService.pingAllDevices();
+    setNewUser({ name: "", role: "waiter", pin: "", active: true });
+    setShowAddUserDialog(false);
+
     toast({
-      title: "Ping Sent",
-      description: "Pinging all devices on the network",
+      title: "User Added",
+      description: `${user.name} has been added as ${user.role}`,
     });
+
+    soundService.playSound('success');
   };
 
-  const handleBackupNow = async () => {
+  const handleEditUser = (user: User) => {
+    if (!user.name || !user.pin) {
+      toast({
+        title: "Incomplete Information",
+        description: "Please fill all required fields",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    // Check if PIN already exists for other users
+    const existingUser = data.users.find(u => u.pin === user.pin && u.id !== user.id);
+    if (existingUser) {
+      toast({
+        title: "PIN Already Exists",
+        description: "Please choose a different PIN",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    const updatedUsers = data.users.map(u => u.id === user.id ? user : u);
+    databaseService.updateData({ users: updatedUsers });
+
+    // Sync user update across devices
+    syncService.broadcast({
+      type: 'user',
+      action: 'update',
+      data: user,
+      timestamp: Date.now(),
+      deviceId: syncService.getDeviceId()
+    });
+
+    setEditingUser(null);
+
+    toast({
+      title: "User Updated",
+      description: `${user.name} has been updated`,
+    });
+
+    soundService.playSound('success');
+  };
+
+  const handleDeleteUser = (userId: string) => {
+    const user = data.users.find(u => u.id === userId);
+    const updatedUsers = data.users.filter(u => u.id !== userId);
+    databaseService.updateData({ users: updatedUsers });
+
+    // Sync user deletion across devices
+    syncService.broadcast({
+      type: 'user',
+      action: 'delete',
+      data: { id: userId },
+      timestamp: Date.now(),
+      deviceId: syncService.getDeviceId()
+    });
+
+    toast({
+      title: "User Deleted",
+      description: `${user?.name} has been removed`,
+    });
+
+    soundService.playSound('success');
+  };
+
+  const exportBackup = () => {
     try {
-      await backupService.downloadBackup();
+      const backupData = databaseService.exportData();
+      const blob = new Blob([backupData], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `lokalrestro-backup-${new Date().toISOString().split('T')[0]}.json`;
+      link.click();
+      URL.revokeObjectURL(url);
+
       toast({
         title: "Backup Created",
-        description: "System backup downloaded successfully",
+        description: "Database backup has been downloaded",
       });
+
+      soundService.playSound('success');
     } catch (error) {
       toast({
         title: "Backup Failed",
-        description: (error as Error).message,
+        description: "Failed to create backup",
         variant: "destructive"
       });
+      soundService.playSound('error');
     }
   };
 
-  const handleRestoreFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
-    try {
-      await backupService.restoreBackup(file);
-      const pending = backupService.getPendingRestore();
-      setPendingRestore(pending);
-      setShowRestoreDialog(true);
-    } catch (error) {
+  const importBackup = () => {
+    if (!backupData.trim()) {
       toast({
-        title: "Invalid Backup File",
-        description: (error as Error).message,
+        title: "No Data",
+        description: "Please paste backup data",
         variant: "destructive"
       });
+      return;
     }
-  };
 
-  const handleConfirmRestore = async () => {
     try {
-      await backupService.confirmRestore();
-      setPendingRestore(null);
-      setShowRestoreDialog(false);
-      
-      toast({
-        title: "Restore Completed",
-        description: "System restored successfully. Refreshing...",
+      databaseService.importData(backupData);
+      setBackupData("");
+      setShowBackupDialog(false);
+
+      // Sync full data restore across devices
+      syncService.broadcast({
+        type: 'system',
+        action: 'restore',
+        data: { timestamp: Date.now() },
+        timestamp: Date.now(),
+        deviceId: syncService.getDeviceId()
       });
-      
-      setTimeout(() => window.location.reload(), 2000);
+
+      toast({
+        title: "Backup Restored",
+        description: "Database has been restored successfully",
+      });
+
+      soundService.playSound('success');
     } catch (error) {
       toast({
         title: "Restore Failed",
-        description: (error as Error).message,
+        description: "Failed to restore backup: " + (error as Error).message,
         variant: "destructive"
       });
+      soundService.playSound('error');
     }
   };
 
-  const handleCancelRestore = () => {
-    backupService.cancelRestore();
-    setPendingRestore(null);
-    setShowRestoreDialog(false);
+  const handleFileImport = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const content = e.target?.result as string;
+      setBackupData(content);
+    };
+    reader.readAsText(file);
   };
 
-  const getDeviceStatusColor = (status: string) => {
-    return status === 'online' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800';
-  };
-
-  const getLogTypeColor = (type: string) => {
-    switch (type) {
-      case 'sync': return 'bg-blue-100 text-blue-800';
-      case 'error': return 'bg-red-100 text-red-800';
-      case 'conflict': return 'bg-yellow-100 text-yellow-800';
-      default: return 'bg-gray-100 text-gray-800';
+  const resetSystem = () => {
+    if (confirm('Are you sure you want to reset the entire system? This will delete all data!')) {
+      localStorage.clear();
+      window.location.reload();
     }
   };
+
+  const forceSync = async () => {
+    try {
+      await syncService.pingAllDevices();
+      
+      // Broadcast full data sync
+      syncService.broadcast({
+        type: 'system',
+        action: 'full-sync',
+        data: databaseService.getData(),
+        timestamp: Date.now(),
+        deviceId: syncService.getDeviceId()
+      });
+
+      toast({
+        title: "Sync Initiated",
+        description: "Full system sync has been triggered",
+      });
+
+      soundService.playSound('success');
+    } catch (error) {
+      toast({
+        title: "Sync Failed",
+        description: "Failed to initiate sync",
+        variant: "destructive"
+      });
+      soundService.playSound('error');
+    }
+  };
+
+  const getRoleBadgeColor = (role: User['role']) => {
+    switch (role) {
+      case 'admin': return 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200';
+      case 'chef': return 'bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200';
+      case 'waiter': return 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200';
+      case 'cashier': return 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200';
+      case 'housekeeping': return 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200';
+      default: return 'bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-200';
+    }
+  };
+
+  const getStorageInfo = () => {
+    try {
+      const data = localStorage.getItem('lokalrestro_data');
+      const sizeInBytes = new Blob([data || '']).size;
+      const sizeInKB = (sizeInBytes / 1024).toFixed(2);
+      return { size: sizeInKB, orders: JSON.parse(data || '{}').orders?.length || 0 };
+    } catch {
+      return { size: '0', orders: 0 };
+    }
+  };
+
+  const storageInfo = getStorageInfo();
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold text-gray-900">Admin Tools</h1>
-        <p className="text-gray-500 mt-1">System monitoring and maintenance tools</p>
+    <div className="space-y-6 p-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">Admin Tools</h1>
+          <p className="text-gray-500 dark:text-gray-400">
+            System administration and management
+          </p>
+        </div>
+        <div className="flex items-center space-x-2">
+          <Badge className={syncStatus.online ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}>
+            {syncStatus.online ? "Online" : "Offline"}
+          </Badge>
+          <Button variant="outline" onClick={forceSync}>
+            <RefreshCw className="h-4 w-4 mr-2" />
+            Force Sync
+          </Button>
+        </div>
       </div>
 
-      {/* System Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        <Card className="border-0 shadow-lg">
-          <CardContent className="p-6">
-            <div className="flex items-center">
-              <HardDrive className="h-8 w-8 text-blue-600" />
-              <div className="ml-4">
-                <p className="text-sm font-medium text-gray-600">Total Orders</p>
-                <p className="text-2xl font-bold text-gray-900">{systemStats.totalOrders}</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+      <Tabs defaultValue="users" className="space-y-4">
+        <TabsList className="grid w-full grid-cols-4">
+          <TabsTrigger value="users">User Management</TabsTrigger>
+          <TabsTrigger value="system">System Info</TabsTrigger>
+          <TabsTrigger value="backup">Backup & Restore</TabsTrigger>
+          <TabsTrigger value="sync">Sync Status</TabsTrigger>
+        </TabsList>
 
-        <Card className="border-0 shadow-lg">
-          <CardContent className="p-6">
-            <div className="flex items-center">
-              <Server className="h-8 w-8 text-green-600" />
-              <div className="ml-4">
-                <p className="text-sm font-medium text-gray-600">Revenue</p>
-                <p className="text-2xl font-bold text-gray-900">₹{systemStats.totalRevenue.toLocaleString()}</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+        <TabsContent value="users" className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-xl font-semibold">User Management</h2>
+            <Dialog open={showAddUserDialog} onOpenChange={setShowAddUserDialog}>
+              <DialogTrigger asChild>
+                <Button>
+                  <Plus className="h-4 w-4 mr-2" />
+                  Add User
+                </Button>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Add New User</DialogTitle>
+                  <DialogDescription>Create a new user account</DialogDescription>
+                </DialogHeader>
+                
+                <div className="space-y-4">
+                  <div>
+                    <Label>Full Name *</Label>
+                    <Input
+                      value={newUser.name}
+                      onChange={(e) => setNewUser(prev => ({ ...prev, name: e.target.value }))}
+                      placeholder="Enter full name"
+                    />
+                  </div>
 
-        <Card className="border-0 shadow-lg">
-          <CardContent className="p-6">
-            <div className="flex items-center">
-              <Wifi className="h-8 w-8 text-purple-600" />
-              <div className="ml-4">
-                <p className="text-sm font-medium text-gray-600">Active Devices</p>
-                <p className="text-2xl font-bold text-gray-900">{systemStats.activeDevices}</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+                  <div>
+                    <Label>Role *</Label>
+                    <Select value={newUser.role} onValueChange={(value: User['role']) => setNewUser(prev => ({ ...prev, role: value }))}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="admin">Admin</SelectItem>
+                        <SelectItem value="waiter">Waiter</SelectItem>
+                        <SelectItem value="chef">Chef</SelectItem>
+                        <SelectItem value="cashier">Cashier</SelectItem>
+                        <SelectItem value="housekeeping">Housekeeping</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
 
-        <Card className="border-0 shadow-lg">
-          <CardContent className="p-6">
-            <div className="flex items-center">
-              <Clock className="h-8 w-8 text-orange-600" />
-              <div className="ml-4">
-                <p className="text-sm font-medium text-gray-600">System Uptime</p>
-                <p className="text-2xl font-bold text-gray-900">{systemStats.uptime}</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+                  <div>
+                    <Label>PIN Code *</Label>
+                    <Input
+                      type="password"
+                      value={newUser.pin}
+                      onChange={(e) => setNewUser(prev => ({ ...prev, pin: e.target.value }))}
+                      placeholder="4-digit PIN"
+                      maxLength={4}
+                    />
+                  </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* System Actions */}
-        <Card className="border-0 shadow-lg">
-          <CardHeader>
-            <CardTitle className="flex items-center">
-              <MonitorCheck className="h-5 w-5 mr-2 text-blue-600" />
-              System Actions
-            </CardTitle>
-            <CardDescription>Critical system maintenance and testing tools</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid grid-cols-2 gap-3">
-              <Button 
-                onClick={handleTestPrinter}
-                className="bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700"
-                size="sm"
-              >
-                <Printer className="h-4 w-4 mr-2" />
-                Test Printer
-              </Button>
-              
-              <Button 
-                onClick={handlePingAllDevices}
-                variant="outline"
-                className="border-2"
-                size="sm"
-              >
-                <RefreshCw className="h-4 w-4 mr-2" />
-                Ping All Devices
-              </Button>
-              
-              <Button 
-                onClick={handleBackupNow}
-                className="bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700"
-                size="sm"
-              >
-                <Download className="h-4 w-4 mr-2" />
-                Backup Now
-              </Button>
-              
-              <div>
-                <input
+                  <div className="flex items-center justify-between">
+                    <Label>Active User</Label>
+                    <Switch
+                      checked={newUser.active}
+                      onCheckedChange={(checked) => setNewUser(prev => ({ ...prev, active: checked }))}
+                    />
+                  </div>
+                </div>
+
+                <div className="flex justify-end space-x-2">
+                  <Button variant="outline" onClick={() => setShowAddUserDialog(false)}>
+                    Cancel
+                  </Button>
+                  <Button onClick={handleAddUser}>
+                    Add User
+                  </Button>
+                </div>
+              </DialogContent>
+            </Dialog>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {data.users.map((user) => (
+              <Card key={user.id} className="border-0 shadow-lg">
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="flex items-center">
+                      <Users className="h-5 w-5 mr-2" />
+                      {user.name}
+                    </CardTitle>
+                    <div className="flex items-center space-x-2">
+                      <Badge className={getRoleBadgeColor(user.role)}>
+                        {user.role}
+                      </Badge>
+                      <Badge className={user.active ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}>
+                        {user.active ? "Active" : "Inactive"}
+                      </Badge>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-2">
+                    <p className="text-sm text-gray-500">PIN: •••{user.pin.slice(-1)}</p>
+                    <p className="text-sm text-gray-500">Role: {user.role}</p>
+                    <div className="flex justify-between pt-2">
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        onClick={() => setEditingUser(user)}
+                      >
+                        <Edit className="h-4 w-4 mr-1" />
+                        Edit
+                      </Button>
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        onClick={() => handleDeleteUser(user.id)}
+                        className="text-red-600 hover:text-red-700"
+                      >
+                        <Trash2 className="h-4 w-4 mr-1" />
+                        Delete
+                      </Button>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+
+          {/* Edit User Dialog */}
+          {editingUser && (
+            <Dialog open={!!editingUser} onOpenChange={() => setEditingUser(null)}>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Edit User</DialogTitle>
+                  <DialogDescription>Update user information</DialogDescription>
+                </DialogHeader>
+                
+                <div className="space-y-4">
+                  <div>
+                    <Label>Full Name *</Label>
+                    <Input
+                      value={editingUser.name}
+                      onChange={(e) => setEditingUser(prev => prev ? { ...prev, name: e.target.value } : null)}
+                      placeholder="Enter full name"
+                    />
+                  </div>
+
+                  <div>
+                    <Label>Role *</Label>
+                    <Select value={editingUser.role} onValueChange={(value: User['role']) => setEditingUser(prev => prev ? { ...prev, role: value } : null)}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="admin">Admin</SelectItem>
+                        <SelectItem value="waiter">Waiter</SelectItem>
+                        <SelectItem value="chef">Chef</SelectItem>
+                        <SelectItem value="cashier">Cashier</SelectItem>
+                        <SelectItem value="housekeeping">Housekeeping</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div>
+                    <Label>PIN Code *</Label>
+                    <Input
+                      type="password"
+                      value={editingUser.pin}
+                      onChange={(e) => setEditingUser(prev => prev ? { ...prev, pin: e.target.value } : null)}
+                      placeholder="4-digit PIN"
+                      maxLength={4}
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between">
+                    <Label>Active User</Label>
+                    <Switch
+                      checked={editingUser.active}
+                      onCheckedChange={(checked) => setEditingUser(prev => prev ? { ...prev, active: checked } : null)}
+                    />
+                  </div>
+                </div>
+
+                <div className="flex justify-end space-x-2">
+                  <Button variant="outline" onClick={() => setEditingUser(null)}>
+                    Cancel
+                  </Button>
+                  <Button onClick={() => editingUser && handleEditUser(editingUser)}>
+                    Update User
+                  </Button>
+                </div>
+              </DialogContent>
+            </Dialog>
+          )}
+        </TabsContent>
+
+        <TabsContent value="system" className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Database Size</CardTitle>
+                <Database className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{storageInfo.size} KB</div>
+                <p className="text-xs text-muted-foreground">
+                  {storageInfo.orders} orders stored
+                </p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Active Users</CardTitle>
+                <Users className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{data.users.filter(u => u.active).length}</div>
+                <p className="text-xs text-muted-foreground">
+                  of {data.users.length} total users
+                </p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">System Status</CardTitle>
+                <Activity className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-2">
+                  <div className="flex justify-between text-sm">
+                    <span>Sync</span>
+                    <Badge className={syncStatus.online ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}>
+                      {syncStatus.online ? "Online" : "Offline"}
+                    </Badge>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span>Sounds</span>
+                    <Badge className={data.settings.enableSounds ? "bg-green-100 text-green-800" : "bg-gray-100 text-gray-800"}>
+                      {data.settings.enableSounds ? "Enabled" : "Disabled"}
+                    </Badge>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span>Printer</span>
+                    <Badge className={data.settings.printerConfig.enabled ? "bg-green-100 text-green-800" : "bg-gray-100 text-gray-800"}>
+                      {data.settings.printerConfig.enabled ? "Enabled" : "Disabled"}
+                    </Badge>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center">
+                <Settings className="h-5 w-5 mr-2" />
+                System Actions
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <Button variant="outline" onClick={() => soundService.playTestSound()}>
+                  Test Sound System
+                </Button>
+                <Button variant="outline" onClick={forceSync}>
+                  Force Full Sync
+                </Button>
+                <Button variant="destructive" onClick={resetSystem}>
+                  Reset System
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="backup" className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center">
+                  <Download className="h-5 w-5 mr-2" />
+                  Export Backup
+                </CardTitle>
+                <CardDescription>Download a complete backup of your data</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Button onClick={exportBackup} className="w-full">
+                  <Download className="h-4 w-4 mr-2" />
+                  Download Backup
+                </Button>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center">
+                  <Upload className="h-5 w-5 mr-2" />
+                  Import Backup
+                </CardTitle>
+                <CardDescription>Restore data from a backup file</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <Input
                   type="file"
                   accept=".json"
-                  onChange={handleRestoreFile}
-                  style={{ display: 'none' }}
-                  id="restore-file"
+                  onChange={handleFileImport}
                 />
-                <Button 
-                  variant="outline"
-                  className="w-full border-2"
-                  size="sm"
-                  onClick={() => document.getElementById('restore-file')?.click()}
-                >
-                  <Upload className="h-4 w-4 mr-2" />
-                  Restore Backup
-                </Button>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Connected Devices */}
-        <Card className="border-0 shadow-lg">
-          <CardHeader>
-            <CardTitle className="flex items-center">
-              <Wifi className="h-5 w-5 mr-2 text-purple-600" />
-              Connected Devices
-            </CardTitle>
-            <CardDescription>Real-time LAN device monitoring</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <ScrollArea className="h-64">
-              <div className="space-y-3">
-                {connectedDevices.length > 0 ? (
-                  connectedDevices.map((device) => (
-                    <div key={device.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                      <div>
-                        <p className="font-medium text-gray-900">{device.name}</p>
-                        <p className="text-sm text-gray-500">{device.ip} • {device.role}</p>
-                      </div>
-                      <div className="text-right">
-                        <Badge className={getDeviceStatusColor(device.status)}>
-                          {device.status}
-                        </Badge>
-                        {device.ping && (
-                          <p className="text-xs text-gray-500 mt-1">{device.ping}ms</p>
-                        )}
-                      </div>
+                <Dialog open={showBackupDialog} onOpenChange={setShowBackupDialog}>
+                  <DialogTrigger asChild>
+                    <Button variant="outline" className="w-full">
+                      <Upload className="h-4 w-4 mr-2" />
+                      Import from Text
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent className="max-w-2xl">
+                    <DialogHeader>
+                      <DialogTitle>Import Backup Data</DialogTitle>
+                      <DialogDescription>Paste your backup data below</DialogDescription>
+                    </DialogHeader>
+                    
+                    <div className="space-y-4">
+                      <Textarea
+                        value={backupData}
+                        onChange={(e) => setBackupData(e.target.value)}
+                        placeholder="Paste backup JSON data here..."
+                        rows={10}
+                      />
                     </div>
-                  ))
-                ) : (
-                  <div className="text-center py-8">
-                    <Wifi className="h-12 w-12 text-gray-400 mx-auto mb-2" />
-                    <p className="text-gray-500">No devices connected</p>
+
+                    <div className="flex justify-end space-x-2">
+                      <Button variant="outline" onClick={() => setShowBackupDialog(false)}>
+                        Cancel
+                      </Button>
+                      <Button onClick={importBackup}>
+                        Import Backup
+                      </Button>
+                    </div>
+                  </DialogContent>
+                </Dialog>
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="sync" className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center">
+                  <Activity className="h-5 w-5 mr-2" />
+                  Sync Status
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-4">
+                  <div className="flex justify-between items-center">
+                    <span>Connection Status:</span>
+                    <Badge className={syncStatus.online ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}>
+                      {syncStatus.online ? "Connected" : "Disconnected"}
+                    </Badge>
                   </div>
-                )}
-              </div>
-            </ScrollArea>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Sync Logs */}
-      <Card className="border-0 shadow-lg">
-        <CardHeader>
-          <CardTitle className="flex items-center">
-            <Server className="h-5 w-5 mr-2 text-green-600" />
-            Sync Logs
-          </CardTitle>
-          <CardDescription>Recent synchronization activity and errors</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <ScrollArea className="h-80">
-            <div className="space-y-2">
-              {syncLogs.length > 0 ? (
-                syncLogs.map((log) => (
-                  <div key={log.id} className="flex items-center justify-between p-3 border rounded-lg">
-                    <div className="flex items-center space-x-3">
-                      {log.type === 'error' ? (
-                        <AlertTriangle className="h-4 w-4 text-red-600" />
-                      ) : (
-                        <CheckCircle className="h-4 w-4 text-green-600" />
-                      )}
-                      <div>
-                        <p className="text-sm font-medium">{log.message}</p>
-                        <p className="text-xs text-gray-500">Device: {log.deviceId}</p>
-                      </div>
-                    </div>
-                    <div className="text-right">
-                      <Badge className={getLogTypeColor(log.type)}>
-                        {log.type}
-                      </Badge>
-                      <p className="text-xs text-gray-500 mt-1">
-                        {new Date(log.timestamp).toLocaleTimeString()}
-                      </p>
-                    </div>
+                  <div className="flex justify-between items-center">
+                    <span>Sync Method:</span>
+                    <Badge variant="outline">{syncStatus.method}</Badge>
                   </div>
-                ))
-              ) : (
-                <div className="text-center py-8">
-                  <Server className="h-12 w-12 text-gray-400 mx-auto mb-2" />
-                  <p className="text-gray-500">No sync activity yet</p>
+                  <div className="flex justify-between items-center">
+                    <span>Device ID:</span>
+                    <Badge variant="outline">{syncService.getDeviceId().slice(-8)}</Badge>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span>Connected Devices:</span>
+                    <Badge variant="outline">{syncStatus.devices}</Badge>
+                  </div>
                 </div>
-              )}
-            </div>
-          </ScrollArea>
-        </CardContent>
-      </Card>
+              </CardContent>
+            </Card>
 
-      {/* Restore Confirmation Dialog */}
-      <Dialog open={showRestoreDialog} onOpenChange={setShowRestoreDialog}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Confirm System Restore</DialogTitle>
-            <DialogDescription>
-              This will replace all current data with the backup. This action cannot be undone.
-            </DialogDescription>
-          </DialogHeader>
-          
-          {pendingRestore && (
-            <div className="space-y-4">
-              <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
-                <h4 className="font-medium text-yellow-800 mb-2">Backup Information</h4>
-                <div className="text-sm text-yellow-700 space-y-1">
-                  <p>Restaurant: {pendingRestore.metadata.restaurantName}</p>
-                  <p>Backup Date: {new Date(pendingRestore.timestamp).toLocaleString()}</p>
-                  <p>Orders: {pendingRestore.orders.length}</p>
-                  <p>Menu Items: {pendingRestore.menu.length}</p>
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center">
+                  <HardDrive className="h-5 w-5 mr-2" />
+                  Connected Devices
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-3">
+                  {connectedDevices.length > 0 ? (
+                    connectedDevices.map((device) => (
+                      <div key={device.id} className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                        <div>
+                          <p className="font-medium">{device.name}</p>
+                          <p className="text-sm text-gray-500">{device.ip} - {device.role}</p>
+                        </div>
+                        <div className="flex items-center space-x-2">
+                          {device.ping && (
+                            <Badge variant="outline">{device.ping.toFixed(0)}ms</Badge>
+                          )}
+                          <Badge className={device.status === 'online' ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}>
+                            {device.status}
+                          </Badge>
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="text-center text-gray-500 py-4">No devices connected</p>
+                  )}
                 </div>
-              </div>
-              
-              <div className="flex justify-end space-x-2">
-                <Button variant="outline" onClick={handleCancelRestore}>
-                  Cancel
-                </Button>
-                <Button 
-                  onClick={handleConfirmRestore}
-                  className="bg-red-600 hover:bg-red-700"
-                >
-                  Confirm Restore
-                </Button>
-              </div>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

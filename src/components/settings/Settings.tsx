@@ -1,12 +1,11 @@
+
 import { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Slider } from "@/components/ui/slider";
-import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { databaseService } from "@/services/databaseService";
 import { soundService } from "@/services/soundService";
@@ -20,10 +19,12 @@ export function Settings() {
   const [logoPreview, setLogoPreview] = useState<string>('');
 
   useEffect(() => {
-    const unsubscribe = databaseService.subscribe(setData);
-    setSettings(data.settings);
+    const unsubscribe = databaseService.subscribe((newData) => {
+      setData(newData);
+      setSettings(newData.settings);
+    });
     return unsubscribe;
-  }, [setData]);
+  }, []);
 
   useEffect(() => {
     if (logoFile) {
@@ -37,6 +38,15 @@ export function Settings() {
     }
   }, [logoFile, settings.logo]);
 
+  // Apply dark mode to document
+  useEffect(() => {
+    if (settings.darkMode) {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+  }, [settings.darkMode]);
+
   const updateNestedSetting = (key: string, value: any) => {
     const updatedSettings = {
       ...settings,
@@ -44,73 +54,46 @@ export function Settings() {
     };
     setSettings(updatedSettings);
     databaseService.updateSettings(updatedSettings);
+
+    // Update sound service if sound settings changed
+    if (key === 'enableSounds' || key === 'soundVolume') {
+      soundService.updateSettings();
+    }
+
+    // Update printer service if printer settings changed
+    if (key === 'printerConfig') {
+      printerService.updateConfig(value);
+    }
   };
 
   const handleLogoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
       setLogoFile(file);
-      updateNestedSetting('logo', URL.createObjectURL(file));
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        updateNestedSetting('logo', reader.result as string);
+      };
+      reader.readAsDataURL(file);
     }
-  };
-
-  const handleRestaurantNameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    updateNestedSetting('restaurantName', e.target.value);
-  };
-
-  const handlePrimaryColorChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    updateNestedSetting('primaryColor', e.target.value);
-  };
-
-  const handleCurrencyChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    updateNestedSetting('currency', e.target.value);
-  };
-
-  const handleTaxRateChange = (value: number[]) => {
-    updateNestedSetting('taxRate', value[0]);
-  };
-
-  const handleServiceChargeRateChange = (value: number[]) => {
-    updateNestedSetting('serviceChargeRate', value[0]);
-  };
-
-  const handleEnableSoundsChange = (checked: boolean) => {
-    updateNestedSetting('enableSounds', checked);
-    soundService.updateSettings();
-  };
-
-  const handleSoundVolumeChange = (value: number[]) => {
-    updateNestedSetting('soundVolume', value[0]);
-    soundService.updateSettings();
-  };
-
-  const handlePrinterIpChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    updateNestedSetting('printerConfig', { ...settings.printerConfig, ip: e.target.value });
-  };
-
-  const handlePrinterPortChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    updateNestedSetting('printerConfig', { ...settings.printerConfig, port: e.target.value });
-  };
-
-  const handlePrinterEnabledChange = (checked: boolean) => {
-    updateNestedSetting('printerConfig', { ...settings.printerConfig, enabled: checked });
-  };
-
-  const handleRoomManagementChange = (checked: boolean) => {
-    updateNestedSetting('modules', { ...settings.modules, roomManagement: checked });
-  };
-
-  const handleKDSModuleChange = (checked: boolean) => {
-    updateNestedSetting('modules', { ...settings.modules, kds: checked });
-  };
-
-  const handleReportsModuleChange = (checked: boolean) => {
-    updateNestedSetting('modules', { ...settings.modules, reports: checked });
   };
 
   const handleDarkModeChange = (checked: boolean) => {
     updateNestedSetting('darkMode', checked);
-    document.documentElement.classList.toggle('dark', checked);
+    
+    // Immediately apply theme change
+    if (checked) {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+
+    toast({
+      title: "Theme Updated",
+      description: `Switched to ${checked ? 'dark' : 'light'} mode`,
+    });
+
+    soundService.playSound('success');
   };
 
   const handleTestPrinter = async () => {
@@ -121,29 +104,28 @@ export function Settings() {
         phone: '+91 98765 43210'
       },
       order: {
-        id: 'TEST-001',
+        id: 'TEST-' + Date.now(),
         table: 'T1',
         waiter: 'Test User',
         timestamp: new Date().toISOString()
       },
       items: [
-        { name: 'Butter Chicken', quantity: 1, price: 350, total: 350 },
-        { name: 'Naan Bread', quantity: 2, price: 45, total: 90 },
-        { name: 'Lassi', quantity: 1, price: 80, total: 80 }
+        { name: 'Test Item 1', quantity: 2, price: 150, total: 300 },
+        { name: 'Test Item 2', quantity: 1, price: 200, total: 200 }
       ],
       totals: {
-        subtotal: 520,
-        tax: 93.60,
-        serviceCharge: 52,
+        subtotal: 500,
+        tax: 90,
+        serviceCharge: 50,
         discount: 0,
-        total: 665.60
+        total: 640
       },
       payment: {
         method: 'Cash',
-        amount: 700,
-        change: 34.40
+        amount: 650,
+        change: 10
       },
-      footer: 'Thank you for dining with us!\nVisit again soon!'
+      footer: 'Thank you for testing LokalRestro!\nPrint System Working'
     };
 
     const success = await printerService.printReceipt(testReceipt);
@@ -155,10 +137,20 @@ export function Settings() {
         : "Failed to connect to printer. Check printer configuration.",
       variant: success ? "default" : "destructive"
     });
+
+    soundService.playSound(success ? 'success' : 'error');
+  };
+
+  const handleTestSound = () => {
+    soundService.playTestSound();
+    toast({
+      title: "Sound Test",
+      description: "Playing test sound with current settings",
+    });
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 p-6">
       <div>
         <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">Settings</h1>
         <p className="text-gray-500 dark:text-gray-400">Manage your restaurant settings</p>
@@ -175,7 +167,7 @@ export function Settings() {
             <Input
               id="restaurantName"
               value={settings.restaurantName}
-              onChange={handleRestaurantNameChange}
+              onChange={(e) => updateNestedSetting('restaurantName', e.target.value)}
             />
           </div>
           <div>
@@ -189,7 +181,7 @@ export function Settings() {
             />
             <Button variant="outline" asChild>
               <label htmlFor="logo" className="cursor-pointer">
-                {logoFile ? 'Change Logo' : 'Upload Logo'}
+                {logoFile || settings.logo ? 'Change Logo' : 'Upload Logo'}
               </label>
             </Button>
             {logoPreview && (
@@ -204,15 +196,16 @@ export function Settings() {
               type="color"
               id="primaryColor"
               value={settings.primaryColor}
-              onChange={handlePrimaryColorChange}
+              onChange={(e) => updateNestedSetting('primaryColor', e.target.value)}
             />
           </div>
           <div>
-            <Label htmlFor="currency">Currency</Label>
+            <Label htmlFor="currency">Currency Symbol</Label>
             <Input
               id="currency"
               value={settings.currency}
-              onChange={handleCurrencyChange}
+              onChange={(e) => updateNestedSetting('currency', e.target.value)}
+              placeholder="₹"
             />
           </div>
         </CardContent>
@@ -228,10 +221,10 @@ export function Settings() {
             <Label htmlFor="taxRate">Tax Rate (%)</Label>
             <Slider
               id="taxRate"
-              defaultValue={[settings.taxRate]}
+              value={[settings.taxRate]}
               max={30}
               step={0.5}
-              onValueChange={handleTaxRateChange}
+              onValueChange={([value]) => updateNestedSetting('taxRate', value)}
             />
             <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
               Current Tax Rate: {settings.taxRate}%
@@ -241,10 +234,10 @@ export function Settings() {
             <Label htmlFor="serviceChargeRate">Service Charge Rate (%)</Label>
             <Slider
               id="serviceChargeRate"
-              defaultValue={[settings.serviceChargeRate]}
+              value={[settings.serviceChargeRate]}
               max={20}
               step={0.5}
-              onValueChange={handleServiceChargeRateChange}
+              onValueChange={([value]) => updateNestedSetting('serviceChargeRate', value)}
             />
             <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
               Current Service Charge Rate: {settings.serviceChargeRate}%
@@ -256,45 +249,51 @@ export function Settings() {
       <Card className="border-0 shadow-lg">
         <CardHeader>
           <CardTitle>Sound Settings</CardTitle>
-          <CardDescription>Enable or disable sound notifications</CardDescription>
+          <CardDescription>Configure audio notifications</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex items-center justify-between">
-            <Label htmlFor="enableSounds">Enable Sounds</Label>
+            <Label htmlFor="enableSounds">Enable Sound Notifications</Label>
             <Switch
               id="enableSounds"
               checked={settings.enableSounds}
-              onCheckedChange={handleEnableSoundsChange}
+              onCheckedChange={(checked) => updateNestedSetting('enableSounds', checked)}
             />
           </div>
           <div>
             <Label htmlFor="soundVolume">Sound Volume</Label>
             <Slider
               id="soundVolume"
-              defaultValue={[settings.soundVolume]}
+              value={[settings.soundVolume]}
               max={100}
               step={1}
-              onValueChange={handleSoundVolumeChange}
+              onValueChange={([value]) => updateNestedSetting('soundVolume', value)}
+              disabled={!settings.enableSounds}
             />
             <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
               Current Volume: {settings.soundVolume}%
             </p>
           </div>
+          <Button variant="outline" onClick={handleTestSound} disabled={!settings.enableSounds}>
+            Test Sound
+          </Button>
         </CardContent>
       </Card>
 
       <Card className="border-0 shadow-lg">
         <CardHeader>
           <CardTitle>Printer Settings</CardTitle>
-          <CardDescription>Configure your thermal printer</CardDescription>
+          <CardDescription>Configure your thermal printer for receipts</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex items-center justify-between">
-            <Label htmlFor="printerEnabled">Printer Enabled</Label>
+            <Label htmlFor="printerEnabled">Enable Printer</Label>
             <Switch
               id="printerEnabled"
               checked={settings.printerConfig.enabled}
-              onCheckedChange={handlePrinterEnabledChange}
+              onCheckedChange={(checked) => 
+                updateNestedSetting('printerConfig', { ...settings.printerConfig, enabled: checked })
+              }
             />
           </div>
           <div>
@@ -302,7 +301,11 @@ export function Settings() {
             <Input
               id="printerIp"
               value={settings.printerConfig.ip}
-              onChange={(e) => handlePrinterIpChange(e)}
+              onChange={(e) => 
+                updateNestedSetting('printerConfig', { ...settings.printerConfig, ip: e.target.value })
+              }
+              placeholder="192.168.1.100"
+              disabled={!settings.printerConfig.enabled}
             />
           </div>
           <div>
@@ -310,41 +313,66 @@ export function Settings() {
             <Input
               id="printerPort"
               value={settings.printerConfig.port}
-              onChange={handlePrinterPortChange}
+              onChange={(e) => 
+                updateNestedSetting('printerConfig', { ...settings.printerConfig, port: e.target.value })
+              }
+              placeholder="9100"
+              disabled={!settings.printerConfig.enabled}
             />
           </div>
-          <Button onClick={handleTestPrinter}>Test Printer</Button>
+          <Button 
+            variant="outline" 
+            onClick={handleTestPrinter}
+            disabled={!settings.printerConfig.enabled}
+          >
+            Test Printer
+          </Button>
         </CardContent>
       </Card>
 
       <Card className="border-0 shadow-lg">
         <CardHeader>
           <CardTitle>Module Settings</CardTitle>
-          <CardDescription>Enable or disable modules</CardDescription>
+          <CardDescription>Enable or disable system modules</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex items-center justify-between">
-            <Label htmlFor="roomManagement">Room Management</Label>
+            <div>
+              <Label htmlFor="roomManagement">Room Management</Label>
+              <p className="text-sm text-gray-500 dark:text-gray-400">Hotel room booking and management</p>
+            </div>
             <Switch
               id="roomManagement"
               checked={settings.modules.roomManagement}
-              onCheckedChange={handleRoomManagementChange}
+              onCheckedChange={(checked) => 
+                updateNestedSetting('modules', { ...settings.modules, roomManagement: checked })
+              }
             />
           </div>
           <div className="flex items-center justify-between">
-            <Label htmlFor="kdsModule">Kitchen Display System (KDS)</Label>
+            <div>
+              <Label htmlFor="kdsModule">Kitchen Display System</Label>
+              <p className="text-sm text-gray-500 dark:text-gray-400">Real-time kitchen order display</p>
+            </div>
             <Switch
               id="kdsModule"
               checked={settings.modules.kds}
-              onCheckedChange={handleKDSModuleChange}
+              onCheckedChange={(checked) => 
+                updateNestedSetting('modules', { ...settings.modules, kds: checked })
+              }
             />
           </div>
           <div className="flex items-center justify-between">
-            <Label htmlFor="reportsModule">Reports Module</Label>
+            <div>
+              <Label htmlFor="reportsModule">Reports & Analytics</Label>
+              <p className="text-sm text-gray-500 dark:text-gray-400">Sales reports and business analytics</p>
+            </div>
             <Switch
               id="reportsModule"
               checked={settings.modules.reports}
-              onCheckedChange={handleReportsModuleChange}
+              onCheckedChange={(checked) => 
+                updateNestedSetting('modules', { ...settings.modules, reports: checked })
+              }
             />
           </div>
         </CardContent>
@@ -353,11 +381,14 @@ export function Settings() {
       <Card className="border-0 shadow-lg">
         <CardHeader>
           <CardTitle>Appearance</CardTitle>
-          <CardDescription>Customize the look and feel</CardDescription>
+          <CardDescription>Customize the look and feel of the application</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex items-center justify-between">
-            <Label htmlFor="darkMode">Dark Mode</Label>
+            <div>
+              <Label htmlFor="darkMode">Dark Mode</Label>
+              <p className="text-sm text-gray-500 dark:text-gray-400">Switch between light and dark themes</p>
+            </div>
             <Switch
               id="darkMode"
               checked={settings.darkMode}

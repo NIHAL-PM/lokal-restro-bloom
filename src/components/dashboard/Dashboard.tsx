@@ -1,172 +1,315 @@
 
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Progress } from "@/components/ui/progress";
 import { 
-  TrendingUp, 
+  ShoppingCart, 
+  ChefHat, 
+  Receipt, 
+  Table, 
+  Bed, 
   Users, 
-  DollarSign, 
+  TrendingUp,
   Clock,
-  Table,
-  Bed,
-  ChefHat,
-  AlertCircle,
-  Plus
+  DollarSign,
+  AlertCircle
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { databaseService } from "@/services/databaseService";
+import { syncService } from "@/services/syncService";
+import { soundService } from "@/services/soundService";
+import type { DatabaseSchema, Order, Table as TableType, Room } from "@/services/databaseService";
 
 export function Dashboard() {
-  const [stats, setStats] = useState({
-    todayRevenue: 15420,
-    activeOrders: 12,
-    occupiedTables: 8,
-    occupiedRooms: 14,
-    pendingKitchen: 5,
-    totalGuests: 34
+  const [data, setData] = useState<DatabaseSchema>(databaseService.getData());
+  const [syncStatus, setSyncStatus] = useState(syncService.getSyncStatus());
+
+  useEffect(() => {
+    const unsubscribeDb = databaseService.subscribe(setData);
+    
+    const syncInterval = setInterval(() => {
+      setSyncStatus(syncService.getSyncStatus());
+    }, 5000);
+
+    return () => {
+      unsubscribeDb();
+      clearInterval(syncInterval);
+    };
+  }, []);
+
+  // Calculate real-time metrics
+  const todayOrders = data.orders.filter(order => {
+    const orderDate = new Date(order.timestamp);
+    const today = new Date();
+    return orderDate.toDateString() === today.toDateString();
   });
 
-  const [recentOrders] = useState([
-    { id: "ORD-001", table: "T5", items: 3, amount: 450, status: "preparing", time: "2 min ago" },
-    { id: "ORD-002", room: "R101", items: 2, amount: 280, status: "ready", time: "5 min ago" },
-    { id: "ORD-003", table: "T2", items: 4, amount: 720, status: "served", time: "8 min ago" },
-  ]);
+  const pendingOrders = data.orders.filter(order => order.status === 'pending');
+  const readyOrders = data.orders.filter(order => order.status === 'ready');
+  const occupiedTables = data.tables.filter(table => table.status === 'occupied');
+  const occupiedRooms = data.rooms.filter(room => room.status === 'occupied');
+  
+  const todayRevenue = todayOrders.reduce((sum, order) => sum + order.total, 0);
+  const avgOrderValue = todayOrders.length > 0 ? todayRevenue / todayOrders.length : 0;
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case "preparing": return "bg-yellow-100 text-yellow-800";
-      case "ready": return "bg-green-100 text-green-800";
-      case "served": return "bg-blue-100 text-blue-800";
-      default: return "bg-gray-100 text-gray-800";
+  // Table occupancy rate
+  const tableOccupancyRate = (occupiedTables.length / data.tables.length) * 100;
+  const roomOccupancyRate = (occupiedRooms.length / data.rooms.length) * 100;
+
+  const quickActions = [
+    {
+      title: "New Order",
+      description: "Create a new order",
+      icon: ShoppingCart,
+      action: () => window.location.href = "/orders",
+      color: "bg-blue-500"
+    },
+    {
+      title: "Kitchen View",
+      description: "Check kitchen orders",
+      icon: ChefHat,
+      action: () => window.location.href = "/kitchen",
+      color: "bg-orange-500",
+      badge: pendingOrders.length > 0 ? pendingOrders.length : undefined
+    },
+    {
+      title: "Billing",
+      description: "Process payments",
+      icon: Receipt,
+      action: () => window.location.href = "/billing",
+      color: "bg-green-500",
+      badge: readyOrders.length > 0 ? readyOrders.length : undefined
+    },
+    {
+      title: "Manage Tables",
+      description: "Table management",
+      icon: Table,
+      action: () => window.location.href = "/tables",
+      color: "bg-purple-500"
     }
-  };
+  ];
+
+  const alerts = [
+    ...(pendingOrders.length > 5 ? [{
+      type: "warning" as const,
+      message: `${pendingOrders.length} orders pending in kitchen`,
+      action: () => window.location.href = "/kitchen"
+    }] : []),
+    ...(readyOrders.length > 3 ? [{
+      type: "info" as const,
+      message: `${readyOrders.length} orders ready for billing`,
+      action: () => window.location.href = "/billing"
+    }] : []),
+    ...(!syncStatus.online ? [{
+      type: "error" as const,
+      message: "Sync offline - operating in local mode",
+      action: () => {}
+    }] : [])
+  ];
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold text-gray-900">Dashboard</h1>
-        <p className="text-gray-500 mt-1">Real-time overview of your restaurant operations</p>
+    <div className="space-y-6 p-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">Dashboard</h1>
+          <p className="text-gray-500 dark:text-gray-400">
+            Welcome to {data.settings.restaurantName}
+          </p>
+        </div>
+        <div className="flex items-center space-x-2">
+          <Badge className={syncStatus.online ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}>
+            {syncStatus.online ? "Online" : "Offline"}
+          </Badge>
+          <Badge variant="outline">
+            {syncStatus.devices} devices
+          </Badge>
+        </div>
       </div>
 
-      {/* Stats Grid */}
+      {/* Alerts */}
+      {alerts.length > 0 && (
+        <div className="space-y-2">
+          {alerts.map((alert, index) => (
+            <Card key={index} className={`border-l-4 ${
+              alert.type === 'error' ? 'border-l-red-500 bg-red-50 dark:bg-red-900/10' :
+              alert.type === 'warning' ? 'border-l-yellow-500 bg-yellow-50 dark:bg-yellow-900/10' :
+              'border-l-blue-500 bg-blue-50 dark:bg-blue-900/10'
+            }`}>
+              <CardContent className="p-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-2">
+                    <AlertCircle className="h-4 w-4" />
+                    <span className="text-sm font-medium">{alert.message}</span>
+                  </div>
+                  {alert.action && (
+                    <Button size="sm" variant="outline" onClick={alert.action}>
+                      View
+                    </Button>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      {/* Quick Actions */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        {quickActions.map((action, index) => (
+          <Card key={index} className="cursor-pointer hover:shadow-lg transition-shadow" onClick={action.action}>
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="flex items-center space-x-2">
+                    <div className={`p-2 rounded-lg ${action.color}`}>
+                      <action.icon className="h-5 w-5 text-white" />
+                    </div>
+                    {action.badge && (
+                      <Badge className="bg-red-500 text-white">{action.badge}</Badge>
+                    )}
+                  </div>
+                  <h3 className="font-semibold mt-3">{action.title}</h3>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">{action.description}</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+
+      {/* Key Metrics */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <Card className="border-0 shadow-lg bg-gradient-to-br from-green-50 to-emerald-100">
+        <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium text-emerald-700">Today's Revenue</CardTitle>
-            <DollarSign className="h-4 w-4 text-emerald-600" />
+            <CardTitle className="text-sm font-medium">Today's Revenue</CardTitle>
+            <DollarSign className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-emerald-900">₹{stats.todayRevenue.toLocaleString()}</div>
-            <p className="text-xs text-emerald-600 flex items-center mt-1">
-              <TrendingUp className="h-3 w-3 mr-1" />
-              +12% from yesterday
+            <div className="text-2xl font-bold">{data.settings.currency}{todayRevenue.toFixed(2)}</div>
+            <p className="text-xs text-muted-foreground">
+              {todayOrders.length} orders today
             </p>
           </CardContent>
         </Card>
 
-        <Card className="border-0 shadow-lg bg-gradient-to-br from-blue-50 to-cyan-100">
+        <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium text-blue-700">Active Orders</CardTitle>
-            <Clock className="h-4 w-4 text-blue-600" />
+            <CardTitle className="text-sm font-medium">Avg Order Value</CardTitle>
+            <TrendingUp className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-blue-900">{stats.activeOrders}</div>
-            <p className="text-xs text-blue-600">
-              {stats.pendingKitchen} pending in kitchen
+            <div className="text-2xl font-bold">{data.settings.currency}{avgOrderValue.toFixed(2)}</div>
+            <p className="text-xs text-muted-foreground">
+              Per order average
             </p>
           </CardContent>
         </Card>
 
-        <Card className="border-0 shadow-lg bg-gradient-to-br from-purple-50 to-violet-100">
+        <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium text-purple-700">Occupied Tables</CardTitle>
-            <Table className="h-4 w-4 text-purple-600" />
+            <CardTitle className="text-sm font-medium">Table Occupancy</CardTitle>
+            <Table className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-purple-900">{stats.occupiedTables}/20</div>
-            <p className="text-xs text-purple-600">
-              40% occupancy rate
+            <div className="text-2xl font-bold">{tableOccupancyRate.toFixed(0)}%</div>
+            <Progress value={tableOccupancyRate} className="mt-2" />
+            <p className="text-xs text-muted-foreground mt-2">
+              {occupiedTables.length} of {data.tables.length} tables
             </p>
           </CardContent>
         </Card>
 
-        <Card className="border-0 shadow-lg bg-gradient-to-br from-orange-50 to-amber-100">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium text-orange-700">Occupied Rooms</CardTitle>
-            <Bed className="h-4 w-4 text-orange-600" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-orange-900">{stats.occupiedRooms}/25</div>
-            <p className="text-xs text-orange-600">
-              {stats.totalGuests} total guests
-            </p>
-          </CardContent>
-        </Card>
+        {data.settings.modules.roomManagement && (
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Room Occupancy</CardTitle>
+              <Bed className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{roomOccupancyRate.toFixed(0)}%</div>
+              <Progress value={roomOccupancyRate} className="mt-2" />
+              <p className="text-xs text-muted-foreground mt-2">
+                {occupiedRooms.length} of {data.rooms.length} rooms
+              </p>
+            </CardContent>
+          </Card>
+        )}
       </div>
 
+      {/* Recent Activity & Status */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Recent Orders */}
-        <Card className="border-0 shadow-lg">
+        <Card>
           <CardHeader>
             <CardTitle className="flex items-center">
-              <ChefHat className="h-5 w-5 mr-2 text-blue-600" />
+              <Clock className="h-5 w-5 mr-2" />
               Recent Orders
             </CardTitle>
-            <CardDescription>Latest order activity across all locations</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="space-y-4">
-              {recentOrders.map((order) => (
-                <div key={order.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                  <div className="flex items-center space-x-3">
-                    <div>
-                      <p className="font-medium text-gray-900">{order.id}</p>
-                      <p className="text-sm text-gray-500">
-                        {order.table ? `Table ${order.table}` : `Room ${order.room}`} • {order.items} items
-                      </p>
-                    </div>
+            <div className="space-y-3">
+              {todayOrders.slice(-5).reverse().map((order) => (
+                <div key={order.id} className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                  <div>
+                    <p className="font-medium">{order.id}</p>
+                    <p className="text-sm text-gray-500">
+                      {order.tableId ? `Table ${order.tableId}` : order.roomId ? `Room ${order.roomId}` : 'Takeaway'}
+                    </p>
                   </div>
                   <div className="text-right">
-                    <p className="font-semibold text-gray-900">₹{order.amount}</p>
-                    <div className="flex items-center space-x-2">
-                      <Badge className={getStatusColor(order.status)}>
-                        {order.status}
-                      </Badge>
-                      <span className="text-xs text-gray-500">{order.time}</span>
-                    </div>
+                    <p className="font-semibold">{data.settings.currency}{order.total}</p>
+                    <Badge className={
+                      order.status === 'pending' ? 'bg-yellow-100 text-yellow-800' :
+                      order.status === 'ready' ? 'bg-green-100 text-green-800' :
+                      'bg-blue-100 text-blue-800'
+                    }>
+                      {order.status}
+                    </Badge>
                   </div>
                 </div>
               ))}
+              {todayOrders.length === 0 && (
+                <p className="text-center text-gray-500 py-4">No orders today</p>
+              )}
             </div>
           </CardContent>
         </Card>
 
-        {/* Quick Actions */}
-        <Card className="border-0 shadow-lg">
+        <Card>
           <CardHeader>
             <CardTitle className="flex items-center">
-              <AlertCircle className="h-5 w-5 mr-2 text-green-600" />
-              Quick Actions
+              <Users className="h-5 w-5 mr-2" />
+              System Status
             </CardTitle>
-            <CardDescription>Common tasks and shortcuts</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-2 gap-3">
-              <Button className="h-16 flex flex-col bg-gradient-to-br from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700">
-                <Plus className="h-5 w-5 mb-1" />
-                New Order
-              </Button>
-              <Button variant="outline" className="h-16 flex flex-col border-2 hover:bg-gray-50">
-                <Table className="h-5 w-5 mb-1" />
-                Manage Tables
-              </Button>
-              <Button variant="outline" className="h-16 flex flex-col border-2 hover:bg-gray-50">
-                <Bed className="h-5 w-5 mb-1" />
-                Check-in Guest
-              </Button>
-              <Button variant="outline" className="h-16 flex flex-col border-2 hover:bg-gray-50">
-                <ChefHat className="h-5 w-5 mb-1" />
-                Kitchen View
-              </Button>
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <span>Database</span>
+                <Badge className="bg-green-100 text-green-800">Active</Badge>
+              </div>
+              <div className="flex items-center justify-between">
+                <span>Sync Service</span>
+                <Badge className={syncStatus.online ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}>
+                  {syncStatus.online ? "Connected" : "Offline"}
+                </Badge>
+              </div>
+              <div className="flex items-center justify-between">
+                <span>Print Service</span>
+                <Badge className={data.settings.printerConfig.enabled ? "bg-green-100 text-green-800" : "bg-gray-100 text-gray-800"}>
+                  {data.settings.printerConfig.enabled ? "Enabled" : "Disabled"}
+                </Badge>
+              </div>
+              <div className="flex items-center justify-between">
+                <span>Sound Notifications</span>
+                <Badge className={data.settings.enableSounds ? "bg-green-100 text-green-800" : "bg-gray-100 text-gray-800"}>
+                  {data.settings.enableSounds ? "On" : "Off"}
+                </Badge>
+              </div>
+              <div className="flex items-center justify-between">
+                <span>Connected Devices</span>
+                <Badge variant="outline">{syncStatus.devices}</Badge>
+              </div>
             </div>
           </CardContent>
         </Card>
