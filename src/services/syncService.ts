@@ -1,4 +1,3 @@
-
 interface SyncData {
   type: string;
   action: string;
@@ -35,8 +34,9 @@ class SyncService {
   private isConnected: boolean = false;
   private useWebSocket: boolean = true;
   private fallbackSyncInterval: NodeJS.Timeout | null = null;
-  private lastSync: number = 0;
   private syncQueue: SyncData[] = [];
+  private reconnectAttempts: number = 0;
+  private maxReconnectAttempts: number = 5;
 
   constructor() {
     this.deviceId = this.generateDeviceId();
@@ -55,8 +55,14 @@ class SyncService {
   }
 
   private connect(): void {
+    // Don't try to reconnect if we've exceeded max attempts
+    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+      console.log('Max reconnection attempts reached, switching to local mode permanently');
+      this.fallbackToLocalSync();
+      return;
+    }
+
     try {
-      // Try WebSocket connection first (fallback for HTTPS environments)
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       const wsUrl = `${protocol}//localhost:8765`;
       
@@ -66,6 +72,7 @@ class SyncService {
         console.log('WebSocket connected successfully');
         this.isConnected = true;
         this.useWebSocket = true;
+        this.reconnectAttempts = 0; // Reset on successful connection
         this.startHeartbeat();
         this.sendDiscovery();
         this.processSyncQueue();
@@ -83,14 +90,23 @@ class SyncService {
       this.ws.onclose = () => {
         console.log('WebSocket connection closed');
         this.isConnected = false;
-        this.fallbackToLocalSync();
-        this.scheduleReconnect();
+        this.reconnectAttempts++;
+        
+        if (this.reconnectAttempts < this.maxReconnectAttempts) {
+          this.scheduleReconnect();
+        } else {
+          this.fallbackToLocalSync();
+        }
       };
 
       this.ws.onerror = (error) => {
         console.error('WebSocket error:', error);
         this.isConnected = false;
-        this.fallbackToLocalSync();
+        this.reconnectAttempts++;
+        
+        if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+          this.fallbackToLocalSync();
+        }
       };
 
     } catch (error) {
@@ -104,7 +120,12 @@ class SyncService {
     this.useWebSocket = false;
     this.isConnected = false;
     
-    // Use localStorage events for local sync between tabs
+    // Clear any existing reconnection attempts
+    if (this.reconnectInterval) {
+      clearInterval(this.reconnectInterval);
+      this.reconnectInterval = null;
+    }
+    
     window.addEventListener('storage', this.handleStorageEvent.bind(this));
   }
 
@@ -122,7 +143,6 @@ class SyncService {
   }
 
   private startFallbackSync(): void {
-    // Periodic sync check for localStorage-based sync
     this.fallbackSyncInterval = setInterval(() => {
       if (!this.useWebSocket) {
         this.processLocalSync();
@@ -131,7 +151,6 @@ class SyncService {
   }
 
   private processLocalSync(): void {
-    // Process any queued sync data when not using WebSocket
     if (this.syncQueue.length > 0) {
       const syncData = this.syncQueue.shift();
       if (syncData) {
@@ -142,7 +161,6 @@ class SyncService {
   }
 
   private processSyncQueue(): void {
-    // Process any queued sync data when connection is restored
     while (this.syncQueue.length > 0 && this.isConnected) {
       const syncData = this.syncQueue.shift();
       if (syncData && this.ws && this.ws.readyState === WebSocket.OPEN) {
@@ -209,7 +227,7 @@ class SyncService {
   private startHeartbeat(): void {
     this.heartbeatInterval = setInterval(() => {
       this.sendHeartbeat();
-    }, 30000); // Send heartbeat every 30 seconds
+    }, 30000);
   }
 
   private sendHeartbeat(): void {
@@ -227,10 +245,13 @@ class SyncService {
       clearInterval(this.reconnectInterval);
     }
     
-    this.reconnectInterval = setInterval(() => {
-      console.log('Attempting to reconnect...');
+    // Exponential backoff for reconnection
+    const delay = Math.min(10000 * Math.pow(2, this.reconnectAttempts), 60000);
+    
+    this.reconnectInterval = setTimeout(() => {
+      console.log(`Attempting to reconnect... (attempt ${this.reconnectAttempts + 1}/${this.maxReconnectAttempts})`);
       this.connect();
-    }, 10000); // Try to reconnect every 10 seconds
+    }, delay);
   }
 
   private generateMessageId(): string {
@@ -248,14 +269,12 @@ class SyncService {
   }
 
   private startDeviceDiscovery(): void {
-    // Simulate LAN device discovery
     setInterval(() => {
       this.discoverLocalDevices();
-    }, 60000); // Check every minute
+    }, 60000);
   }
 
   private async discoverLocalDevices(): Promise<void> {
-    // Simulate discovering devices on local network
     const simulatedDevices = [
       { id: 'kitchen-pos-001', name: 'Kitchen Display', ip: '192.168.1.101', role: 'KDS' },
       { id: 'counter-pos-002', name: 'Counter Terminal', ip: '192.168.1.102', role: 'Billing' },
@@ -284,7 +303,6 @@ class SyncService {
         deviceId: this.deviceId
       });
     } else {
-      // Queue for later or use localStorage
       this.syncQueue.push(data);
       if (!this.useWebSocket) {
         localStorage.setItem('lokalrestro_sync', JSON.stringify(data));
@@ -315,7 +333,7 @@ class SyncService {
   getSyncStatus(): { online: boolean; method: string; devices: number } {
     return {
       online: this.isConnected || !this.useWebSocket,
-      method: this.useWebSocket ? 'WebSocket' : 'LocalStorage',
+      method: this.useWebSocket ? (this.isConnected ? 'WebSocket' : 'Connecting...') : 'LocalStorage',
       devices: this.connectedDevices.size
     };
   }
@@ -344,9 +362,7 @@ class SyncService {
     this.connectedDevices.clear();
   }
 
-  // Network discovery methods
   async discoverDevices(): Promise<string[]> {
-    // Simulate network device discovery
     return new Promise((resolve) => {
       setTimeout(() => {
         const simulatedDevices = [
@@ -360,10 +376,9 @@ class SyncService {
   }
 
   async pingDevice(deviceId: string): Promise<number> {
-    // Simulate device ping
     return new Promise((resolve) => {
       setTimeout(() => {
-        resolve(Math.random() * 100 + 10); // Random ping between 10-110ms
+        resolve(Math.random() * 100 + 10);
       }, 100);
     });
   }

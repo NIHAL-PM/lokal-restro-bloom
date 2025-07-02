@@ -1,5 +1,4 @@
-
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -26,12 +25,12 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
   const users = data.users.filter(user => user.active);
 
   // Update sync status periodically
-  useState(() => {
+  useEffect(() => {
     const interval = setInterval(() => {
       setSyncStatus(syncService.getSyncStatus());
     }, 1000);
     return () => clearInterval(interval);
-  });
+  }, []);
 
   const handleLogin = async () => {
     if (!selectedUser || !pin) {

@@ -1,8 +1,8 @@
-
 class SoundService {
   private audioContext: AudioContext | null = null;
   private enabled: boolean = true;
   private volume: number = 0.5;
+  private initialized: boolean = false;
 
   constructor() {
     this.initializeAudio();
@@ -13,14 +13,20 @@ class SoundService {
   private initializeAudio() {
     try {
       this.audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+      this.initialized = true;
     } catch (error) {
       console.warn('Audio context not supported:', error);
+      this.initialized = false;
     }
   }
 
   private attachGlobalFunction() {
-    // Attach global sound function to window
     window.playLokalSound = (type: string) => {
+      if (!this.initialized) {
+        console.log('Sound service not initialized, skipping sound');
+        return;
+      }
+      
       switch (type) {
         case 'new-order':
           this.playNewOrderChime();
@@ -54,11 +60,15 @@ class SoundService {
 
   updateSettings() {
     try {
-      const settings = JSON.parse(localStorage.getItem('lokalrestro_data') || '{}')?.settings;
-      if (settings) {
-        this.enabled = settings.enableSounds !== false;
-        this.volume = settings.soundVolume ? settings.soundVolume / 100 : 0.5;
-        console.log('Sound settings updated:', { enabled: this.enabled, volume: this.volume });
+      const stored = localStorage.getItem('lokalrestro_data');
+      if (stored) {
+        const data = JSON.parse(stored);
+        const settings = data?.settings;
+        if (settings) {
+          this.enabled = settings.enableSounds !== false;
+          this.volume = settings.soundVolume ? settings.soundVolume / 100 : 0.5;
+          console.log('Sound settings updated:', { enabled: this.enabled, volume: this.volume });
+        }
       }
     } catch (error) {
       console.warn('Failed to load sound settings:', error);
@@ -66,13 +76,12 @@ class SoundService {
   }
 
   private playTone(frequency: number, duration: number, type: OscillatorType = 'sine') {
-    if (!this.enabled || !this.audioContext) {
+    if (!this.enabled || !this.audioContext || !this.initialized) {
       console.log('Sound disabled or audio context unavailable');
       return;
     }
 
     try {
-      // Resume audio context if suspended (common in browsers)
       if (this.audioContext.state === 'suspended') {
         this.audioContext.resume();
       }
@@ -100,8 +109,8 @@ class SoundService {
   }
 
   private playSequence(notes: Array<{ frequency: number; duration: number; type?: OscillatorType }>) {
-    if (!this.enabled) {
-      console.log('Sound disabled, skipping sequence');
+    if (!this.enabled || !this.initialized) {
+      console.log('Sound disabled or not initialized, skipping sequence');
       return;
     }
 
@@ -110,75 +119,67 @@ class SoundService {
       setTimeout(() => {
         this.playTone(note.frequency, note.duration, note.type);
       }, currentTime * 1000);
-      currentTime += note.duration + 0.05; // Small gap between notes
+      currentTime += note.duration + 0.05;
     });
   }
 
   playNewOrderChime() {
     console.log('Playing new order chime');
-    // Pleasant ascending chime for new orders
     this.playSequence([
-      { frequency: 523.25, duration: 0.2 }, // C5
-      { frequency: 659.25, duration: 0.2 }, // E5
-      { frequency: 783.99, duration: 0.3 }  // G5
+      { frequency: 523.25, duration: 0.2 },
+      { frequency: 659.25, duration: 0.2 },
+      { frequency: 783.99, duration: 0.3 }
     ]);
   }
 
   playOrderReadyChime() {
     console.log('Playing order ready chime');
-    // Double beep for order ready
     this.playSequence([
-      { frequency: 880, duration: 0.3 },    // A5
-      { frequency: 880, duration: 0.3 }     // A5
+      { frequency: 880, duration: 0.3 },
+      { frequency: 880, duration: 0.3 }
     ]);
   }
 
   playBillPrintChime() {
     console.log('Playing bill print chime');
-    // Quick confirmation sound for billing
     this.playSequence([
-      { frequency: 1046.50, duration: 0.15 }, // C6
-      { frequency: 1318.51, duration: 0.15 }  // E6
+      { frequency: 1046.50, duration: 0.15 },
+      { frequency: 1318.51, duration: 0.15 }
     ]);
   }
 
   playCheckinChime() {
     console.log('Playing checkin chime');
-    // Welcoming sound for check-ins
     this.playSequence([
-      { frequency: 659.25, duration: 0.2 }, // E5
-      { frequency: 783.99, duration: 0.2 }, // G5
-      { frequency: 1046.50, duration: 0.3 } // C6
+      { frequency: 659.25, duration: 0.2 },
+      { frequency: 783.99, duration: 0.2 },
+      { frequency: 1046.50, duration: 0.3 }
     ]);
   }
 
   playCheckoutChime() {
     console.log('Playing checkout chime');
-    // Farewell sound for checkouts
     this.playSequence([
-      { frequency: 1046.50, duration: 0.2 }, // C6
-      { frequency: 783.99, duration: 0.2 },  // G5
-      { frequency: 659.25, duration: 0.3 }   // E5
+      { frequency: 1046.50, duration: 0.2 },
+      { frequency: 783.99, duration: 0.2 },
+      { frequency: 659.25, duration: 0.3 }
     ]);
   }
 
   playErrorSound() {
     console.log('Playing error sound');
-    // Error notification
     this.playTone(200, 0.5, 'sawtooth');
   }
 
   playSuccessSound() {
     console.log('Playing success sound');
-    // Success notification
     this.playSequence([
-      { frequency: 523.25, duration: 0.1 }, // C5
-      { frequency: 659.25, duration: 0.1 }, // E5
-      { frequency: 783.99, duration: 0.2 }  // G5
+      { frequency: 523.25, duration: 0.1 },
+      { frequency: 659.25, duration: 0.1 },
+      { frequency: 783.99, duration: 0.2 }
     ]);
   }
 
-  // Test method for settings
   playTestSound() {
     console.log('Playing test sound');
     this.playNewOrderChime();
@@ -194,17 +195,20 @@ class SoundService {
     console.log('Sound volume set to:', this.volume);
   }
 
-  // Public method to trigger sounds from components
   playSound(type: 'new-order' | 'ready' | 'billing' | 'checkin' | 'checkout' | 'error' | 'success' | 'test') {
     if (window.playLokalSound) {
       window.playLokalSound(type);
     }
   }
+
+  reinitialize() {
+    this.initializeAudio();
+    this.attachGlobalFunction();
+  }
 }
 
 export const soundService = new SoundService();
 
-// Update global sound function declaration
 declare global {
   interface Window {
     playLokalSound?: (type: string) => void;
