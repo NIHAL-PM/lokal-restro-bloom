@@ -57,25 +57,28 @@ class SyncService {
   private connect(): void {
     // Don't try to reconnect if we've exceeded max attempts
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      // ...removed debug log...
       this.fallbackToLocalSync();
       return;
     }
 
     try {
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsUrl = `${protocol}//localhost:8765`;
+      const host = window.location.hostname;
+      const wsUrl = `${protocol}//${host}:8765`;
       
       this.ws = new WebSocket(wsUrl);
       
       this.ws.onopen = () => {
-        // ...removed debug log...
+        console.log('✅ WebSocket connected to sync server');
         this.isConnected = true;
         this.useWebSocket = true;
         this.reconnectAttempts = 0; // Reset on successful connection
         this.startHeartbeat();
         this.sendDiscovery();
         this.processSyncQueue();
+        
+        // Register this device
+        this.registerDevice();
       };
 
       this.ws.onmessage = (event) => {
@@ -83,12 +86,12 @@ class SyncService {
           const message: SyncMessage = JSON.parse(event.data);
           this.handleMessage(message);
         } catch (error) {
-          // ...removed debug log...
+          console.warn('Failed to parse sync message:', error);
         }
       };
 
       this.ws.onclose = () => {
-        // ...removed debug log...
+        console.log('🔌 WebSocket disconnected from sync server');
         this.isConnected = false;
         this.reconnectAttempts++;
         
@@ -100,7 +103,7 @@ class SyncService {
       };
 
       this.ws.onerror = (error) => {
-        // ...removed debug log...
+        console.warn('WebSocket error:', error);
         this.isConnected = false;
         this.reconnectAttempts++;
         
@@ -110,7 +113,7 @@ class SyncService {
       };
 
     } catch (error) {
-      // ...removed debug log...
+      console.warn('Failed to create WebSocket connection:', error);
       this.fallbackToLocalSync();
     }
   }
@@ -268,28 +271,76 @@ class SyncService {
     });
   }
 
-  private startDeviceDiscovery(): void {
-    setInterval(() => {
-      this.discoverLocalDevices();
-    }, 60000);
+  private registerDevice(): void {
+    const deviceInfo = {
+      name: this.getDeviceName(),
+      type: this.getDeviceType(),
+      ip: 'auto-detected',
+      role: this.getDeviceRole(),
+      userAgent: navigator.userAgent,
+      screen: {
+        width: window.screen.width,
+        height: window.screen.height
+      },
+      timestamp: Date.now()
+    };
+
+    this.sendMessage({
+      id: this.generateMessageId(),
+      type: 'register_device',
+      data: deviceInfo,
+      timestamp: Date.now(),
+      deviceId: this.deviceId
+    });
   }
 
-  private async discoverLocalDevices(): Promise<void> {
-    const simulatedDevices = [
-      { id: 'kitchen-pos-001', name: 'Kitchen Display', ip: '192.168.1.101', role: 'KDS' },
-      { id: 'counter-pos-002', name: 'Counter Terminal', ip: '192.168.1.102', role: 'Billing' },
-      { id: 'mobile-waiter-003', name: 'Waiter Mobile', ip: '192.168.1.103', role: 'Orders' }
-    ];
+  private getDeviceName(): string {
+    const stored = localStorage.getItem('lokalrestro_device_name');
+    if (stored) return stored;
+    
+    const type = this.getDeviceType();
+    const timestamp = new Date().toLocaleTimeString();
+    return `${type}-${timestamp}`;
+  }
 
-    simulatedDevices.forEach(device => {
-      if (!this.connectedDevices.has(device.id)) {
-        this.connectedDevices.set(device.id, {
-          ...device,
-          status: 'online',
-          lastSeen: new Date().toISOString()
-        });
-      }
-    });
+  private getDeviceType(): string {
+    const userAgent = navigator.userAgent.toLowerCase();
+    const width = window.screen.width;
+    
+    if (/android/i.test(userAgent)) {
+      return width < 600 ? 'Android Phone' : 'Android Tablet';
+    }
+    if (/iphone/i.test(userAgent)) {
+      return 'iPhone';
+    }
+    if (/ipad/i.test(userAgent)) {
+      return 'iPad';
+    }
+    if (/windows/i.test(userAgent)) {
+      return 'Windows PC';
+    }
+    if (/mac/i.test(userAgent)) {
+      return 'Mac';
+    }
+    if (/linux/i.test(userAgent)) {
+      return 'Linux PC';
+    }
+    
+    return width < 600 ? 'Mobile Device' : width < 1024 ? 'Tablet' : 'Desktop';
+  }
+
+  private getDeviceRole(): string {
+    const path = window.location.pathname;
+    const stored = localStorage.getItem('lokalrestro_device_role');
+    
+    if (stored) return stored;
+    
+    if (path.includes('/kitchen')) return 'KDS';
+    if (path.includes('/billing')) return 'POS';
+    if (path.includes('/orders')) return 'Waiter';
+    if (path.includes('/admin')) return 'Admin';
+    
+    return 'General';
   }
 
   // Public API
@@ -362,24 +413,64 @@ class SyncService {
     this.connectedDevices.clear();
   }
 
+  private startDeviceDiscovery(): void {
+    // Send discovery message every 60 seconds
+    setInterval(() => {
+      if (this.isConnected) {
+        this.sendDiscovery();
+      }
+    }, 60000);
+  }
+
   async discoverDevices(): Promise<string[]> {
     return new Promise((resolve) => {
-      setTimeout(() => {
-        const simulatedDevices = [
-          'LokalRestro-Kitchen-001',
-          'LokalRestro-Counter-002',
-          'LokalRestro-Mobile-003'
-        ];
-        resolve(simulatedDevices);
-      }, 1000);
+      const discoveredDevices: string[] = [];
+      
+      // Get currently connected devices
+      this.connectedDevices.forEach((device) => {
+        discoveredDevices.push(`${device.name} (${device.role}) - ${device.status}`);
+      });
+      
+      resolve(discoveredDevices);
     });
   }
 
   async pingDevice(deviceId: string): Promise<number> {
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
+      if (!this.isConnected) {
+        reject(new Error('Not connected to sync server'));
+        return;
+      }
+
+      const startTime = Date.now();
+      const pingId = this.generateMessageId();
+      
+      // Create a temporary listener for the pong response
+      const handlePong = (message: any) => {
+        if (message.type === 'pong' && message.data?.id === pingId) {
+          const roundTripTime = Date.now() - startTime;
+          resolve(roundTripTime);
+          this.ws?.removeEventListener('message', handlePong);
+        }
+      };
+      
+      // Add temporary listener
+      this.ws?.addEventListener('message', handlePong);
+      
+      // Send ping
+      this.sendMessage({
+        id: pingId,
+        type: 'ping',
+        data: { id: pingId, timestamp: startTime, targetDevice: deviceId },
+        timestamp: startTime,
+        deviceId: this.deviceId
+      });
+      
+      // Timeout after 5 seconds
       setTimeout(() => {
-        resolve(Math.random() * 100 + 10);
-      }, 100);
+        this.ws?.removeEventListener('message', handlePong);
+        reject(new Error('Ping timeout'));
+      }, 5000);
     });
   }
 

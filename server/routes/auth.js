@@ -9,11 +9,11 @@ const router = express.Router();
 router.post('/register', async (req, res) => {
   const { pin } = req.body;
   if (!pin) return res.status(400).json({ error: 'PIN required' });
-  const db = getDb();
+  const db = await getDb();
   if (db.admin) return res.status(403).json({ error: 'Admin already registered' });
   const hash = await bcrypt.hash(pin, 10);
   db.admin = { hash };
-  saveDb(db);
+  await saveDb(db);
   res.json({ success: true });
 });
 
@@ -21,7 +21,7 @@ router.post('/register', async (req, res) => {
 router.post('/login', async (req, res) => {
   const { pin } = req.body;
   if (!pin) return res.status(400).json({ error: 'PIN required' });
-  const db = getDb();
+  const db = await getDb();
   if (!db.admin) return res.status(403).json({ error: 'No admin registered' });
   const match = await bcrypt.compare(pin, db.admin.hash);
   if (!match) return res.status(401).json({ error: 'Invalid PIN' });

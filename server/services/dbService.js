@@ -1,20 +1,35 @@
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { LowSync, JSONFileSync } from 'lowdb';
+import { Low } from 'lowdb';
+import { JSONFile } from 'lowdb/node';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const dbFile = join(__dirname, '../db/db.json');
-const adapter = new JSONFileSync(dbFile);
-const db = new LowSync(adapter);
-db.read();
-if (!db.data) db.data = {};
 
-export function getDb() {
-  db.read();
+// Default data structure
+const defaultData = {
+  users: [],
+  orders: [],
+  menu: [],
+  tables: [],
+  rooms: [],
+  settings: {},
+  reports: [],
+  admin: null
+};
+
+const adapter = new JSONFile(dbFile);
+const db = new Low(adapter, defaultData);
+
+// Initialize database
+await db.read();
+
+export async function getDb() {
+  await db.read();
   return db.data;
 }
 
-export function saveDb(data) {
+export async function saveDb(data) {
   db.data = data;
-  db.write();
+  await db.write();
 }

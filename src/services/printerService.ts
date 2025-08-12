@@ -144,15 +144,14 @@ class PrinterService {
 
   async printReceipt(receipt: Receipt): Promise<boolean> {
     if (!this.config.enabled) {
-      // ...removed debug log...
+      console.warn('Printer is disabled in configuration');
       return false;
     }
 
     try {
       const escposData = this.formatESCPOS(receipt);
       
-      // In a real implementation, this would send to the actual printer
-      // For now, we'll simulate the network call
+      // Send to the actual printer via network
       const response = await fetch(`http://${this.config.ip}:${this.config.port}/print`, {
         method: 'POST',
         headers: {
@@ -162,17 +161,58 @@ class PrinterService {
       });
 
       if (response.ok) {
-        // ...removed debug log...
+        console.log('✅ Receipt printed successfully');
         return true;
       } else {
         throw new Error(`Printer responded with status: ${response.status}`);
       }
     } catch (error) {
-      // ...removed debug log...
-      // For demo purposes, we'll log the ESC/POS data
-      // ...removed debug log...
-      return false;
+      console.error('❌ Print failed:', error);
+      
+      // Try alternative method: direct socket connection
+      try {
+        return await this.printViaSocket(escposData);
+      } catch (socketError) {
+        console.error('❌ Socket print also failed:', socketError);
+        
+        // Last resort: use system print via server
+        return await this.printViaServer(receipt);
+      }
     }
+  }
+
+  private async printViaSocket(data: string): Promise<boolean> {
+    // This would require a WebSocket or server-side socket implementation
+    // For now, we'll use the API method
+    const response = await fetch('/api/printer/print-raw', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        printerIP: this.config.ip,
+        printerPort: this.config.port,
+        data: data
+      }),
+    });
+
+    return response.ok;
+  }
+
+  private async printViaServer(receipt: Receipt): Promise<boolean> {
+    const response = await fetch('/api/printer/print-receipt', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        printerIP: this.config.ip,
+        printerPort: this.config.port,
+        receipt: receipt
+      }),
+    });
+
+    return response.ok;
   }
 
   async testPrinter(): Promise<boolean> {

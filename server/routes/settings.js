@@ -4,16 +4,16 @@ import { getDb, saveDb } from '../services/dbService.js';
 const router = express.Router();
 
 // Get settings
-router.get('/', (req, res) => {
-  const db = getDb();
+router.get('/', async (req, res) => {
+  const db = await getDb();
   res.json(db.settings || {});
 });
 
 // Update settings
-router.put('/', (req, res) => {
-  const db = getDb();
+router.put('/', async (req, res) => {
+  const db = await getDb();
   db.settings = { ...db.settings, ...req.body };
-  saveDb(db);
+  await saveDb(db);
   res.json(db.settings);
 });
 
